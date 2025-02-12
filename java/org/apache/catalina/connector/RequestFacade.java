@@ -40,7 +40,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import jakarta.servlet.http.HttpUpgradeHandler;
 import jakarta.servlet.http.Part;
-import jakarta.servlet.http.PushBuilder;
 
 import org.apache.tomcat.util.res.StringManager;
 
@@ -567,22 +566,9 @@ public class RequestFacade implements HttpServletRequest {
 
     @Override
     public <T extends HttpUpgradeHandler> T upgrade(Class<T> httpUpgradeHandlerClass)
-            throws java.io.IOException, ServletException {
+            throws IOException, ServletException {
         checkFacade();
         return request.upgrade(httpUpgradeHandlerClass);
-    }
-
-
-    @Override
-    public PushBuilder newPushBuilder() {
-        checkFacade();
-        return request.newPushBuilder();
-    }
-
-
-    public PushBuilder newPushBuilder(HttpServletRequest request) {
-        checkFacade();
-        return this.request.newPushBuilder(request);
     }
 
 

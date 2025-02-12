@@ -116,7 +116,7 @@ final class StandardHostValve extends ValveBase {
                 }
             } catch (Throwable t) {
                 ExceptionUtils.handleThrowable(t);
-                container.getLogger().error("Exception Processing " + request.getRequestURI(), t);
+                container.getLogger().error(sm.getString("standardHostValve.exception", request.getRequestURI()), t);
                 // If a new error occurred while trying to report a previous
                 // error allow the original error to be reported.
                 if (!response.isErrorReportRequired()) {
@@ -203,23 +203,8 @@ final class StandardHostValve extends ValveBase {
         }
         if (errorPage != null && response.isErrorReportRequired()) {
             response.setAppCommitted(false);
-            request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, Integer.valueOf(statusCode));
+            setRequestErrorAttributes(request, statusCode, null, response.getMessage(), null, errorPage.getLocation());
 
-            String message = response.getMessage();
-            if (message == null) {
-                message = "";
-            }
-            request.setAttribute(RequestDispatcher.ERROR_MESSAGE, message);
-            request.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR, errorPage.getLocation());
-            request.setAttribute(Globals.DISPATCHER_TYPE_ATTR, DispatcherType.ERROR);
-
-
-            Wrapper wrapper = request.getWrapper();
-            if (wrapper != null) {
-                request.setAttribute(RequestDispatcher.ERROR_SERVLET_NAME, wrapper.getName());
-            }
-            request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, request.getRequestURI());
-            request.setAttribute(RequestDispatcher.ERROR_QUERY_STRING, request.getQueryString());
             if (custom(request, response, errorPage)) {
                 response.setErrorReported();
                 try {
@@ -227,7 +212,7 @@ final class StandardHostValve extends ValveBase {
                 } catch (ClientAbortException e) {
                     // Ignore
                 } catch (IOException e) {
-                    container.getLogger().warn("Exception Processing " + errorPage, e);
+                    container.getLogger().warn(sm.getString("standardHostValve.exception", errorPage), e);
                 }
             }
         }
@@ -273,32 +258,22 @@ final class StandardHostValve extends ValveBase {
         if (errorPage != null) {
             if (response.setErrorReported()) {
                 response.setAppCommitted(false);
-                request.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR, errorPage.getLocation());
-                request.setAttribute(Globals.DISPATCHER_TYPE_ATTR, DispatcherType.ERROR);
-                request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE,
-                        Integer.valueOf(HttpServletResponse.SC_INTERNAL_SERVER_ERROR));
-                request.setAttribute(RequestDispatcher.ERROR_MESSAGE, throwable.getMessage());
-                request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, realError);
-                Wrapper wrapper = request.getWrapper();
-                if (wrapper != null) {
-                    request.setAttribute(RequestDispatcher.ERROR_SERVLET_NAME, wrapper.getName());
-                }
-                request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, request.getRequestURI());
-                request.setAttribute(RequestDispatcher.ERROR_QUERY_STRING, request.getQueryString());
-                request.setAttribute(RequestDispatcher.ERROR_EXCEPTION_TYPE, realError.getClass());
+                setRequestErrorAttributes(request, HttpServletResponse.SC_INTERNAL_SERVER_ERROR, realError.getClass(),
+                        throwable.getMessage(), realError, errorPage.getLocation());
+
                 if (custom(request, response, errorPage)) {
                     try {
                         response.finishResponse();
                     } catch (IOException e) {
-                        container.getLogger().warn("Exception Processing " + errorPage, e);
+                        container.getLogger().warn(sm.getString("standardHostValve.exception", errorPage), e);
                     }
                 }
             }
         } else {
             /*
-             *  A custom error-page has not been defined for the exception that was thrown during request processing.
-             *  Set the status to 500 if an error status has not already been set and check for custom error-page for
-             *  the status.
+             * A custom error-page has not been defined for the exception that was thrown during request processing. Set
+             * the status to 500 if an error status has not already been set and check for custom error-page for the
+             * status.
              */
             if (response.getStatus() < HttpServletResponse.SC_BAD_REQUEST) {
                 response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
@@ -308,6 +283,49 @@ final class StandardHostValve extends ValveBase {
 
             status(request, response);
         }
+    }
+
+
+    private void setRequestErrorAttributes(Request request, int statusCode, Class<?> exceptionType, String message,
+            Throwable exception, String location) {
+        /*
+         * Generally, don't set attributes to null as that will trigger an unnecessary (in this case) call to
+         * removeAttribute().
+         */
+
+        request.setAttribute(RequestDispatcher.ERROR_STATUS_CODE, Integer.valueOf(statusCode));
+
+        if (exceptionType != null) {
+            request.setAttribute(RequestDispatcher.ERROR_EXCEPTION_TYPE, exceptionType);
+        }
+
+        /*
+         * https://bz.apache.org/bugzilla/show_bug.cgi?id=69444
+         *
+         * Need to ensure message attribute is set even if there is no message (e.g. if error was triggered by an
+         * exception with a null message).
+         */
+        if (message == null) {
+            request.setAttribute(RequestDispatcher.ERROR_MESSAGE, "");
+        } else {
+            request.setAttribute(RequestDispatcher.ERROR_MESSAGE, message);
+        }
+
+        if (exception != null) {
+            request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, exception);
+        }
+
+        request.setAttribute(RequestDispatcher.ERROR_METHOD, request.getMethod());
+        request.setAttribute(RequestDispatcher.ERROR_REQUEST_URI, request.getRequestURI());
+        request.setAttribute(RequestDispatcher.ERROR_QUERY_STRING, request.getQueryString());
+
+        Wrapper wrapper = request.getWrapper();
+        if (wrapper != null) {
+            request.setAttribute(RequestDispatcher.ERROR_SERVLET_NAME, wrapper.getName());
+        }
+
+        request.setAttribute(Globals.DISPATCHER_REQUEST_PATH_ATTR, location);
+        request.setAttribute(Globals.DISPATCHER_TYPE_ATTR, DispatcherType.ERROR);
     }
 
 
@@ -323,8 +341,8 @@ final class StandardHostValve extends ValveBase {
      */
     private boolean custom(Request request, Response response, ErrorPage errorPage) {
 
-        if (container.getLogger().isDebugEnabled()) {
-            container.getLogger().debug("Processing " + errorPage);
+        if (container.getLogger().isTraceEnabled()) {
+            container.getLogger().trace("Processing " + errorPage);
         }
 
         try {
@@ -334,7 +352,7 @@ final class StandardHostValve extends ValveBase {
 
             if (rd == null) {
                 container.getLogger()
-                        .error(sm.getString("standardHostValue.customStatusFailed", errorPage.getLocation()));
+                        .error(sm.getString("standardHostValve.customStatusFailed", errorPage.getLocation()));
                 return false;
             }
 
@@ -372,7 +390,7 @@ final class StandardHostValve extends ValveBase {
         } catch (Throwable t) {
             ExceptionUtils.handleThrowable(t);
             // Report our failure to process this custom page
-            container.getLogger().error("Exception Processing " + errorPage, t);
+            container.getLogger().error(sm.getString("standardHostValve.exception", errorPage), t);
             return false;
         }
     }

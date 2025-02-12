@@ -240,32 +240,37 @@ public abstract class WsRemoteEndpointImplBase implements RemoteEndpoint {
 
 
     void sendMessageBlock(CharBuffer part, boolean last) throws IOException {
-        long timeoutExpiry = getTimeoutExpiry();
+        long timeout = getBlockingSendTimeout();
         boolean isDone = false;
         while (!isDone) {
             encoderBuffer.clear();
             CoderResult cr = encoder.encode(part, encoderBuffer, true);
             if (cr.isError()) {
-                throw new IllegalArgumentException(cr.toString());
+                throw new IllegalArgumentException(sm.getString("wsRemoteEndpoint.encoderError", cr));
             }
             isDone = !cr.isOverflow();
             encoderBuffer.flip();
-            sendMessageBlock(Constants.OPCODE_TEXT, encoderBuffer, last && isDone, timeoutExpiry);
+            sendMessageBlock(Constants.OPCODE_TEXT, encoderBuffer, last && isDone, timeout);
         }
         stateMachine.complete(last);
     }
 
 
     void sendMessageBlock(byte opCode, ByteBuffer payload, boolean last) throws IOException {
-        sendMessageBlock(opCode, payload, last, getTimeoutExpiry());
+        sendMessageBlock(opCode, payload, last, getBlockingSendTimeout());
     }
 
 
-    private long getTimeoutExpiry() {
-        // Get the timeout before we send the message. The message may
-        // trigger a session close and depending on timing the client
-        // session may close before we can read the timeout.
-        long timeout = getBlockingSendTimeout();
+    void sendMessageBlock(byte opCode, ByteBuffer payload, boolean last, long timeout) throws IOException {
+        /*
+         *  Get the timeout before we send the message. The message may trigger a session close and depending on timing
+         *  the client session may close before we can read the timeout.
+         */
+        sendMessageBlockInternal(opCode, payload, last, getTimeoutExpiry(timeout));
+    }
+
+
+    private long getTimeoutExpiry(long timeout) {
         if (timeout < 0) {
             return Long.MAX_VALUE;
         } else {
@@ -274,7 +279,7 @@ public abstract class WsRemoteEndpointImplBase implements RemoteEndpoint {
     }
 
 
-    private void sendMessageBlock(byte opCode, ByteBuffer payload, boolean last, long timeoutExpiry)
+    private void sendMessageBlockInternal(byte opCode, ByteBuffer payload, boolean last, long timeoutExpiry)
             throws IOException {
         wsSession.updateLastActiveWrite();
 
@@ -1236,11 +1241,6 @@ public abstract class WsRemoteEndpointImplBase implements RemoteEndpoint {
                     // NO-OP. Leave state as is.
                 } else if (state == State.STREAM_WRITING) {
                     // NO-OP. Leave state as is.
-                } else {
-                    // Should never happen
-                    // The if ... else ... blocks above should cover all states
-                    // permitted by the preceding checkState() call
-                    throw new IllegalStateException("BUG: This code should never be called");
                 }
             }
         }

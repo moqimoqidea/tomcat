@@ -179,6 +179,30 @@ public final class MessageBytes implements Cloneable, Serializable {
         return strValue;
     }
 
+
+    /**
+     * Convert to String (if not already of the String type) and then return the String value.
+     *
+     * @return The current value as a String
+     */
+    public String toStringType() {
+        switch (type) {
+            case T_NULL:
+            case T_STR:
+                // No conversion required
+                break;
+            case T_BYTES:
+                setString(byteC.toString());
+                break;
+            case T_CHARS:
+                setString(charC.toString());
+                break;
+        }
+
+        return strValue;
+    }
+
+
     // ----------------------------------------
     /**
      * Return the type of the original content. Can be T_STR, T_BYTES, T_CHARS or T_NULL
@@ -504,19 +528,19 @@ public final class MessageBytes implements Cloneable, Serializable {
      */
     public void duplicate(MessageBytes src) throws IOException {
         switch (src.getType()) {
-            case MessageBytes.T_BYTES:
+            case T_BYTES:
                 type = T_BYTES;
                 ByteChunk bc = src.getByteChunk();
                 byteC.allocate(2 * bc.getLength(), -1);
                 byteC.append(bc);
                 break;
-            case MessageBytes.T_CHARS:
+            case T_CHARS:
                 type = T_CHARS;
                 CharChunk cc = src.getCharChunk();
                 charC.allocate(2 * cc.getLength(), -1);
                 charC.append(cc);
                 break;
-            case MessageBytes.T_STR:
+            case T_STR:
                 type = T_STR;
                 String sc = src.getString();
                 this.setString(sc);
@@ -525,9 +549,7 @@ public final class MessageBytes implements Cloneable, Serializable {
         setCharset(src.getCharset());
     }
 
-    // -------------------- Deprecated code --------------------
     // efficient long
-    // XXX used only for headers - shouldn't be stored here.
     private long longValue;
     private boolean hasLongValue = false;
 
@@ -554,7 +576,7 @@ public final class MessageBytes implements Cloneable, Serializable {
             current = current / 10;
             buf[end++] = HexUtils.getHex(digit);
         }
-        byteC.setOffset(0);
+        byteC.setStart(0);
         byteC.setEnd(end);
         // Inverting buffer
         end--;
@@ -574,9 +596,8 @@ public final class MessageBytes implements Cloneable, Serializable {
         type = T_BYTES;
     }
 
-    // Used for headers conversion
     /**
-     * Convert the buffer to a long, cache the value.
+     * Convert the buffer to a long, cache the value. Used for headers conversion.
      *
      * @return the long value
      */

@@ -87,13 +87,14 @@ public class ImportHandler {
         servletClassNames.add("UnavailableException");
         standardPackages.put("jakarta.servlet", servletClassNames);
 
-        // Servlet 6.0
+        // Servlet 6.1
         Set<String> servletHttpClassNames = new HashSet<>();
         // Interfaces
         servletHttpClassNames.add("HttpServletMapping");
         servletHttpClassNames.add("HttpServletRequest");
         servletHttpClassNames.add("HttpServletResponse");
         servletHttpClassNames.add("HttpSession");
+        servletHttpClassNames.add("HttpSession.Accessor");
         servletHttpClassNames.add("HttpSessionActivationListener");
         servletHttpClassNames.add("HttpSessionAttributeListener");
         servletHttpClassNames.add("HttpSessionBindingListener");
@@ -186,6 +187,7 @@ public class ImportHandler {
         javaLangClassNames.add("Runtime.Version");
         javaLangClassNames.add("RuntimePermission");
         javaLangClassNames.add("ScopedValue");
+        javaLangClassNames.add("ScopedValue.CallableOp");
         javaLangClassNames.add("ScopedValue.Carrier");
         javaLangClassNames.add("SecurityManager");
         javaLangClassNames.add("Short");
@@ -288,7 +290,7 @@ public class ImportHandler {
     }
 
 
-    public void importStatic(String name) throws jakarta.el.ELException {
+    public void importStatic(String name) throws ELException {
         int lastPeriod = name.lastIndexOf('.');
 
         if (lastPeriod < 0) {
@@ -343,7 +345,7 @@ public class ImportHandler {
     }
 
 
-    public void importClass(String name) throws jakarta.el.ELException {
+    public void importClass(String name) throws ELException {
         int lastPeriodIndex = name.lastIndexOf('.');
 
         if (lastPeriodIndex < 0) {
@@ -375,7 +377,7 @@ public class ImportHandler {
     }
 
 
-    public java.lang.Class<?> resolveClass(String name) {
+    public Class<?> resolveClass(String name) {
         if (name == null || name.contains(".")) {
             return null;
         }
@@ -435,7 +437,7 @@ public class ImportHandler {
     }
 
 
-    public java.lang.Class<?> resolveStatic(String name) {
+    public Class<?> resolveStatic(String name) {
         return statics.get(name);
     }
 

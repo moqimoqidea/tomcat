@@ -65,13 +65,13 @@ public class MemoryRealm extends RealmBase {
     /**
      * The set of valid Principals for this Realm, keyed by user name.
      */
-    private final Map<String, GenericPrincipal> principals = new HashMap<>();
+    private final Map<String,GenericPrincipal> principals = new HashMap<>();
 
 
     /**
      * The set of credentials for this Realm, keyed by user name.
      */
-    private final Map<String, String> credentials = new HashMap<>();
+    private final Map<String,String> credentials = new HashMap<>();
 
 
     // ------------------------------------------------------------- Properties
@@ -223,8 +223,8 @@ public class MemoryRealm extends RealmBase {
         String pathName = getPathname();
         try (InputStream is = ConfigFileLoader.getSource().getResource(pathName).getInputStream()) {
             // Load the contents of the database file
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("memoryRealm.loadPath", pathName));
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("memoryRealm.loadPath", pathName));
             }
 
             synchronized (digesterLock) {

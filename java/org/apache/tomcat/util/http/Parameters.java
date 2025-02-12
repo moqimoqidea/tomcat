@@ -75,8 +75,8 @@ public final class Parameters {
             charset = DEFAULT_BODY_CHARSET;
         }
         this.charset = charset;
-        if (log.isDebugEnabled()) {
-            log.debug("Set encoding to " + charset.name());
+        if (log.isTraceEnabled()) {
+            log.trace("Set encoding to " + charset.name());
         }
     }
 
@@ -86,8 +86,8 @@ public final class Parameters {
         }
         this.queryStringCharset = queryStringCharset;
 
-        if (log.isDebugEnabled()) {
-            log.debug("Set query string encoding to " + queryStringCharset.name());
+        if (log.isTraceEnabled()) {
+            log.trace("Set query string encoding to " + queryStringCharset.name());
         }
     }
 
@@ -153,15 +153,15 @@ public final class Parameters {
             return;
         }
 
-        if (log.isDebugEnabled()) {
-            log.debug("Decoding query " + decodedQuery + " " + queryStringCharset.name());
+        if (log.isTraceEnabled()) {
+            log.trace("Decoding query " + decodedQuery + " " + queryStringCharset.name());
         }
 
         try {
             decodedQuery.duplicate(queryMB);
         } catch (IOException e) {
             // Can't happen, as decodedQuery can't overflow
-            e.printStackTrace();
+            log.error(sm.getString("parameters.copyFail"), e);
         }
         processParameters(decodedQuery, queryStringCharset);
     }
@@ -203,8 +203,8 @@ public final class Parameters {
 
     private void processParameters(byte bytes[], int start, int len, Charset charset) {
 
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("parameters.bytes", new String(bytes, start, len, DEFAULT_BODY_CHARSET)));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("parameters.bytes", new String(bytes, start, len, DEFAULT_BODY_CHARSET)));
         }
 
         int pos = start;
@@ -376,7 +376,7 @@ public final class Parameters {
             data.toBytes();
         }
         ByteChunk bc = data.getByteChunk();
-        processParameters(bc.getBytes(), bc.getOffset(), bc.getLength(), charset);
+        processParameters(bc.getBytes(), bc.getStart(), bc.getLength(), charset);
     }
 
     /**

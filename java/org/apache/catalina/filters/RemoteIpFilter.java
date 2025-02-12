@@ -34,16 +34,13 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.GenericFilter;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletRequestWrapper;
 import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.PushBuilder;
 
 import org.apache.catalina.AccessLog;
 import org.apache.catalina.Globals;
-import org.apache.catalina.connector.RequestFacade;
 import org.apache.catalina.util.RequestUtil;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
@@ -640,26 +637,8 @@ public class RemoteIpFilter extends GenericFilter {
         public StringBuffer getRequestURL() {
             return RequestUtil.getRequestURL(this);
         }
-
-        @Override
-        public PushBuilder newPushBuilder() {
-            ServletRequest current = getRequest();
-            while (current instanceof ServletRequestWrapper) {
-                current = ((ServletRequestWrapper) current).getRequest();
-            }
-            if (current instanceof RequestFacade) {
-                return ((RequestFacade) current).newPushBuilder(this);
-            } else {
-                return null;
-            }
-        }
     }
 
-
-    /**
-     * {@link Pattern} for a comma delimited string that support whitespace characters
-     */
-    private static final Pattern commaSeparatedValuesPattern = Pattern.compile("\\s*,\\s*");
 
     protected static final String HTTP_SERVER_PORT_PARAMETER = "httpServerPort";
 
@@ -691,18 +670,6 @@ public class RemoteIpFilter extends GenericFilter {
     protected static final String TRUSTED_PROXIES_PARAMETER = "trustedProxies";
 
     protected static final String ENABLE_LOOKUPS_PARAMETER = "enableLookups";
-
-    /**
-     * Convert a given comma delimited list of regular expressions into an array of String
-     *
-     * @param commaDelimitedStrings The string to split
-     *
-     * @return array of patterns (non <code>null</code>)
-     */
-    protected static String[] commaDelimitedListToStringArray(String commaDelimitedStrings) {
-        return (commaDelimitedStrings == null || commaDelimitedStrings.length() == 0) ? new String[0] :
-                commaSeparatedValuesPattern.split(commaDelimitedStrings);
-    }
 
     /**
      * @see #setHttpServerPort(int)
@@ -780,7 +747,7 @@ public class RemoteIpFilter extends GenericFilter {
                 concatRemoteIpHeaderValue.append(e.nextElement());
             }
 
-            String[] remoteIpHeaderValue = commaDelimitedListToStringArray(concatRemoteIpHeaderValue.toString());
+            String[] remoteIpHeaderValue = StringUtils.splitCommaSeparated(concatRemoteIpHeaderValue.toString());
             int idx;
             if (!isInternal) {
                 proxiesHeaderValue.addFirst(request.getRemoteAddr());
@@ -878,8 +845,8 @@ public class RemoteIpFilter extends GenericFilter {
             }
             request.setAttribute(Globals.REQUEST_FORWARDED_ATTRIBUTE, Boolean.TRUE);
 
-            if (log.isDebugEnabled()) {
-                log.debug("Incoming request " + request.getRequestURI() + " with originalRemoteAddr [" +
+            if (log.isTraceEnabled()) {
+                log.trace("Incoming request " + request.getRequestURI() + " with originalRemoteAddr [" +
                         request.getRemoteAddr() + "], originalRemoteHost=[" + request.getRemoteHost() +
                         "], originalSecure=[" + request.isSecure() + "], originalScheme=[" + request.getScheme() +
                         "], originalServerName=[" + request.getServerName() + "], originalServerPort=[" +
@@ -898,8 +865,8 @@ public class RemoteIpFilter extends GenericFilter {
             }
             chain.doFilter(xRequest, response);
         } else {
-            if (log.isDebugEnabled()) {
-                log.debug("Skip RemoteIpFilter for request " + request.getRequestURI() + " with originalRemoteAddr '" +
+            if (log.isTraceEnabled()) {
+                log.trace("Skip RemoteIpFilter for request " + request.getRequestURI() + " with originalRemoteAddr '" +
                         request.getRemoteAddr() + "'");
             }
             chain.doFilter(request, response);
@@ -914,7 +881,7 @@ public class RemoteIpFilter extends GenericFilter {
         if (!protocolHeaderValue.contains(",")) {
             return protocolHeaderHttpsValue.equalsIgnoreCase(protocolHeaderValue);
         }
-        String[] forwardedProtocols = commaDelimitedListToStringArray(protocolHeaderValue);
+        String[] forwardedProtocols = StringUtils.splitCommaSeparated(protocolHeaderValue);
         if (forwardedProtocols.length == 0) {
             return false;
         }
@@ -934,8 +901,7 @@ public class RemoteIpFilter extends GenericFilter {
                 try {
                     port = Integer.parseInt(portHeaderValue);
                 } catch (NumberFormatException nfe) {
-                    log.debug("Invalid port value [" + portHeaderValue + "] provided in header [" + getPortHeader() +
-                            "]");
+                    log.debug(sm.getString("remoteIpFilter.invalidPort", portHeaderValue, getPortHeader()));
                 }
             }
         }

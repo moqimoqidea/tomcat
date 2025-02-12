@@ -18,7 +18,7 @@
 <project name="Apache Tomcat Documentation"
         href="https://tomcat.apache.org/">
 
-    <title>Apache Tomcat 11</title>
+    <title>Apache Tomcat 12</title>
 
     <logo href="/images/tomcat.gif">
       The Apache Tomcat Servlet/JSP Container
@@ -30,7 +30,6 @@
     <menu name="Links">
         <item name="Docs Home"             href="index.html"/>
         <item name="FAQ"                   href="https://cwiki.apache.org/confluence/display/TOMCAT/FAQ" />
-        <item name="User Comments"         href="#comments_section"/>
     </menu>
 
     <menu name="User Guide">

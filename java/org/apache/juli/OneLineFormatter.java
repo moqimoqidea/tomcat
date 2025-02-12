@@ -24,7 +24,6 @@ import java.lang.management.ThreadInfo;
 import java.lang.management.ThreadMXBean;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.logging.Formatter;
 import java.util.logging.LogManager;
 import java.util.logging.LogRecord;
@@ -209,8 +208,11 @@ public class OneLineFormatter extends Formatter {
 
     /**
      * LogRecord has threadID but no thread name.
+     *
+     * @param logRecordThreadId the thread id
+     * @return the thread name
      */
-    private static String getThreadName(long logRecordThreadId) {
+    protected static String getThreadName(long logRecordThreadId) {
         Map<Long, String> cache = threadNameCache.get();
         String result = cache.get(Long.valueOf(logRecordThreadId));
 
@@ -253,7 +255,7 @@ public class OneLineFormatter extends Formatter {
         }
 
         @Override
-        protected boolean removeEldestEntry(Entry<Long, String> eldest) {
+        protected boolean removeEldestEntry(Map.Entry<Long, String> eldest) {
             return (size() > cacheSize);
         }
     }

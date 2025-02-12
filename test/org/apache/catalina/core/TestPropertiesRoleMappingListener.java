@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,7 +39,6 @@ import org.apache.catalina.startup.TesterMapRealm;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
 import org.apache.tomcat.util.buf.ByteChunk;
-import org.apache.tomcat.util.codec.binary.Base64;
 import org.apache.tomcat.util.descriptor.web.LoginConfig;
 import org.apache.tomcat.util.descriptor.web.SecurityCollection;
 import org.apache.tomcat.util.descriptor.web.SecurityConstraint;
@@ -61,7 +61,7 @@ public class TestPropertiesRoleMappingListener extends TomcatBaseTest {
     public void testNotFoundRoleMappingFile() throws Exception {
         Tomcat tomcat = getTomcatInstance();
 
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         PropertiesRoleMappingListener listener = new PropertiesRoleMappingListener();
         ctx.addLifecycleListener(listener);
@@ -139,7 +139,7 @@ public class TestPropertiesRoleMappingListener extends TomcatBaseTest {
 
         for (String role : Arrays.asList("admin", "user", "unmapped")) {
             SecurityCollection securityCollection = new SecurityCollection();
-            securityCollection.addPattern("/" + role);
+            securityCollection.addPattern("/" + role + ".txt");
             SecurityConstraint constraint = new SecurityConstraint();
             constraint.addAuthRole(role);
             constraint.addCollection(securityCollection);
@@ -149,10 +149,10 @@ public class TestPropertiesRoleMappingListener extends TomcatBaseTest {
 
         tomcat.start();
 
-        testRequest("foo:bar", "/admin", 200);
-        testRequest("waldo:fred", "/user", 200);
-        testRequest("waldo:fred", "/unmapped", 403);
-        testRequest("bar:baz", "/user", 401);
+        testRequest("foo:bar", "/admin.txt", 200);
+        testRequest("waldo:fred", "/user.txt", 200);
+        testRequest("waldo:fred", "/unmapped.txt", 403);
+        testRequest("bar:baz", "/user.txt", 401);
     }
 
     private void testRequest(String credentials, String path, int statusCode) throws IOException {
@@ -160,7 +160,7 @@ public class TestPropertiesRoleMappingListener extends TomcatBaseTest {
         Map<String, List<String>> reqHead = new HashMap<>();
         List<String> head = new ArrayList<>();
         head.add(HttpServletRequest.BASIC_AUTH + " " +
-                Base64.encodeBase64String(credentials.getBytes(StandardCharsets.ISO_8859_1)));
+                Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.ISO_8859_1)));
         reqHead.put("Authorization", head);
         int rc = getUrl("http://localhost:" + getPort() + path, out, reqHead, null);
         Assert.assertEquals(statusCode, rc);
