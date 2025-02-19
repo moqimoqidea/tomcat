@@ -52,7 +52,7 @@ public class Cache {
     private LongAdder lookupCount = new LongAdder();
     private LongAdder hitCount = new LongAdder();
 
-    private final ConcurrentMap<String, CachedResource> resourceCache = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String,CachedResource> resourceCache = new ConcurrentHashMap<>();
 
     public Cache(StandardRoot root) {
         this.root = root;
@@ -83,8 +83,8 @@ public class Cache {
         if (cacheEntry == null) {
             // Local copy to ensure consistency
             int objectMaxSizeBytes = getObjectMaxSizeBytes();
-            CachedResource newCacheEntry = new CachedResource(this, root, path, getTtl(), objectMaxSizeBytes,
-                    useClassLoaderResources);
+            CachedResource newCacheEntry =
+                    new CachedResource(this, root, path, getTtl(), objectMaxSizeBytes, useClassLoaderResources);
 
             // Concurrent callers will end up with the same CachedResource
             // instance
@@ -99,7 +99,11 @@ public class Cache {
                 // there is still benefit in caching the resource metadata
 
                 long delta = cacheEntry.getSize();
-                size.addAndGet(delta);
+                long result = size.addAndGet(delta);
+                if (log.isDebugEnabled()) {
+                    log.debug(sm.getString("cache.sizeTracking.add", Long.toString(delta), cacheEntry, path,
+                            Long.toString(result)));
+                }
 
                 if (size.get() > maxSize) {
                     // Process resources unordered for speed. Trades cache
@@ -161,8 +165,8 @@ public class Cache {
         if (cacheEntry == null) {
             // Local copy to ensure consistency
             int objectMaxSizeBytes = getObjectMaxSizeBytes();
-            CachedResource newCacheEntry = new CachedResource(this, root, path, getTtl(), objectMaxSizeBytes,
-                    useClassLoaderResources);
+            CachedResource newCacheEntry =
+                    new CachedResource(this, root, path, getTtl(), objectMaxSizeBytes, useClassLoaderResources);
 
             // Concurrent callers will end up with the same CachedResource
             // instance
@@ -175,7 +179,11 @@ public class Cache {
 
                 // Content will not be cached but we still need metadata size
                 long delta = cacheEntry.getSize();
-                size.addAndGet(delta);
+                long result = size.addAndGet(delta);
+                if (log.isDebugEnabled()) {
+                    log.debug(sm.getString("cache.sizeTracking.add", Long.toString(delta), cacheEntry, path,
+                            Long.toString(result)));
+                }
 
                 if (size.get() > maxSize) {
                     // Process resources unordered for speed. Trades cache
@@ -207,8 +215,8 @@ public class Cache {
         // Create an ordered set of all cached resources with the least recently
         // used first. This is a background process so we can afford to take the
         // time to order the elements first
-        TreeSet<CachedResource> orderedResources = new TreeSet<>(
-                Comparator.comparingLong(CachedResource::getNextCheck));
+        TreeSet<CachedResource> orderedResources =
+                new TreeSet<>(Comparator.comparingLong(CachedResource::getNextCheck));
         orderedResources.addAll(resourceCache.values());
 
         Iterator<CachedResource> iter = orderedResources.iterator();
@@ -261,7 +269,11 @@ public class Cache {
         CachedResource cachedResource = resourceCache.remove(path);
         if (cachedResource != null) {
             long delta = cachedResource.getSize();
-            size.addAndGet(-delta);
+            long result = size.addAndGet(-delta);
+            if (log.isDebugEnabled()) {
+                log.debug(sm.getString("cache.sizeTracking.remove", Long.toString(delta), cachedResource, path,
+                        Long.toString(result)));
+            }
         }
     }
 

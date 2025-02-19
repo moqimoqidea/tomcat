@@ -41,6 +41,7 @@ public class DOMWriter {
 
     /**
      * Prints the specified node, recursively.
+     *
      * @param node The node to output
      */
     public void print(Node node) {
@@ -63,12 +64,24 @@ public class DOMWriter {
                 out.print('<');
                 out.print(node.getLocalName());
                 Attr attrs[] = sortAttributes(node.getAttributes());
+                boolean xmlns = false;
                 for (Attr attr : attrs) {
+                    if ("xmlns".equals(attr.getPrefix())) {
+                        // Skip namespace prefixes as they are removed
+                        continue;
+                    }
                     out.print(' ');
                     out.print(attr.getLocalName());
-
+                    if ("xmlns".equals(attr.getLocalName())) {
+                        xmlns = true;
+                    }
                     out.print("=\"");
                     out.print(Escape.xml("", true, attr.getNodeValue()));
+                    out.print('"');
+                }
+                if (!xmlns && node.getNamespaceURI() != null) {
+                    out.print(" xmlns=\"");
+                    out.print(Escape.xml(node.getNamespaceURI()));
                     out.print('"');
                 }
                 out.print('>');
@@ -87,7 +100,7 @@ public class DOMWriter {
 
             // print text
             case Node.TEXT_NODE:
-                out.print(Escape.xml("", true, node.getNodeValue()));
+                out.print(Escape.xml("", false, node.getNodeValue()));
                 break;
 
             // print processing instruction
@@ -102,7 +115,7 @@ public class DOMWriter {
                 }
                 out.print("?>");
                 break;
-            }
+        }
 
         if (type == Node.ELEMENT_NODE) {
             out.print("</");
@@ -128,7 +141,9 @@ public class DOMWriter {
 
     /**
      * Returns a sorted list of attributes.
+     *
      * @param attrs The map to sort
+     *
      * @return a sorted attribute array
      */
     private Attr[] sortAttributes(NamedNodeMap attrs) {

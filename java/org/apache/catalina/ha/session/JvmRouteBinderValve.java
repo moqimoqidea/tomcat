@@ -184,10 +184,10 @@ public class JvmRouteBinderValve extends ValveBase implements ClusterValve {
                 return;
             }
             handleJvmRoute(request, sessionID, jvmRoute);
-            if (log.isDebugEnabled()) {
+            if (log.isTraceEnabled()) {
                 long t2 = System.currentTimeMillis();
                 long time = t2 - t1;
-                log.debug(sm.getString("jvmRoute.turnoverInfo", Long.valueOf(time)));
+                log.trace(sm.getString("jvmRoute.turnoverInfo", Long.valueOf(time)));
             }
         }
     }
@@ -218,7 +218,7 @@ public class JvmRouteBinderValve extends ValveBase implements ClusterValve {
         Manager manager = request.getContext().getManager();
         if (log.isDebugEnabled()) {
             if (manager != null) {
-                log.debug(sm.getString("jvmRoute.foundManager", manager, request.getContext().getName()));
+                log.trace(sm.getString("jvmRoute.foundManager", manager, request.getContext().getName()));
             } else {
                 log.debug(sm.getString("jvmRoute.notFoundManager", request.getContext().getName()));
             }
@@ -226,17 +226,11 @@ public class JvmRouteBinderValve extends ValveBase implements ClusterValve {
         return manager;
     }
 
-    /**
-     * @return Returns the cluster.
-     */
     @Override
     public CatalinaCluster getCluster() {
         return cluster;
     }
 
-    /**
-     * @param cluster The cluster to set.
-     */
     @Override
     public void setCluster(CatalinaCluster cluster) {
         this.cluster = cluster;
@@ -355,7 +349,7 @@ public class JvmRouteBinderValve extends ValveBase implements ClusterValve {
      *                                   used
      */
     @Override
-    protected synchronized void startInternal() throws LifecycleException {
+    protected void startInternal() throws LifecycleException {
 
         if (cluster == null) {
             Cluster containerCluster = getContainer().getCluster();
@@ -383,7 +377,7 @@ public class JvmRouteBinderValve extends ValveBase implements ClusterValve {
      *                                   used
      */
     @Override
-    protected synchronized void stopInternal() throws LifecycleException {
+    protected void stopInternal() throws LifecycleException {
 
         super.stopInternal();
 

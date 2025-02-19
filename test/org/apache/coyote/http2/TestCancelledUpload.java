@@ -50,8 +50,8 @@ public class TestCancelledUpload extends Http2TestBase {
         byte[] trailerFrameHeader = new byte[9];
         ByteBuffer trailerPayload = ByteBuffer.allocate(256);
 
-        buildPostRequest(headersFrameHeader, headersPayload, false, dataFrameHeader, dataPayload, null,
-                trailerFrameHeader, trailerPayload, 3);
+        buildPostRequest(headersFrameHeader, headersPayload, false, dataFrameHeader, dataPayload, null, true, 3);
+        buildTrailerHeaders(trailerFrameHeader, trailerPayload, 3);
 
         // Write the headers
         writeFrame(headersFrameHeader, headersPayload);
@@ -139,7 +139,7 @@ public class TestCancelledUpload extends Http2TestBase {
         Tomcat tomcat = getTomcatInstance();
 
         // Retain '/simple' url-pattern since it enables code re-use
-        Context ctxt = tomcat.addContext("", null);
+        Context ctxt = getProgrammaticRootContext();
         Tomcat.addServlet(ctxt, "cancel", new CancelServlet());
         ctxt.addServletMappingDecoded("/simple", "cancel");
 

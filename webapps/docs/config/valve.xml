@@ -338,8 +338,9 @@
     <li><b><code>%{xxx}t</code></b> write timestamp at the end of the request formatted using the
         enhanced SimpleDateFormat pattern <code>xxx</code></li>
     <li><b><code>%{xxx}T</code></b> write time taken to process the request using unit <code>xxx</code>
-        where valid units are <code>ms</code> for milliseconds, <code>us</code> for microseconds,
-        and <code>s</code> for seconds. <code>%{s}T</code> is equivalent to <code>%T</code> as well
+        where valid units are <code>ns</code> for nanoseconds, <code>us</code> for microseconds,
+        <code>ms</code> for milliseconds, <code>fracsec</code> for fractional seconds, or <code>s</code> for whole seconds.
+        <code>%{s}T</code> is equivalent to <code>%T</code> as well
         as <code>%{us}T</code> is equivalent to <code>%D</code>.</li>
     </ul>
 
@@ -465,7 +466,9 @@
     <li><b>s-ip</b> - Local IP address</li>
     <li><b>sc-status</b> - HTTP status code of the response</li>
     <li><b>time</b> - Time the request was served in HH:mm:ss format for GMT</li>
-    <li><b>time-taken</b> - Time (in seconds as floating point) taken to serve the request</li>
+    <li><b>time-taken</b> - Time (in seconds) taken to serve the request. Can also use the
+      suffixes <code>-ns</code> for nanoseconds, <code>-us</code> for microseconds,
+      <code>-ms</code> for milliseconds, <code>-fracsec</code> for fractional seconds.</li>
     <li><b>x-threadname</b> - Current request thread name (can compare later with stacktraces)</li>
     </ul>
 
@@ -1444,7 +1447,8 @@
         <code>filter</code> means that a request will bypass authentication if
         it appears to be a CORS preflight request; it is mapped to a web
         application that has the <a href="filter.html#CORS_Filter">CORS
-        Filter</a> enabled; and the CORS Filter is mapped to <code>/*</code>.
+        Filter</a> enabled; and the request matches the URLPatterns for the CORS
+        fitler mapper.
         <code>always</code> means that all requests that appear to be CORS
         preflight requests will bypass authentication. If not set, the default
         value is <code>never</code>.</p>
@@ -1559,12 +1563,6 @@
         If not specified, the default value is <code>false</code>.</p>
       </attribute>
 
-      <attribute name="trimCredentials" required="false">
-        <p>Controls whether leading and/or trailing whitespace is removed from
-        the parsed credentials. If not specified, the default value is
-        <code>true</code>.</p>
-      </attribute>
-
     </attributes>
 
   </subsection>
@@ -1609,7 +1607,8 @@
         <code>filter</code> means that a request will bypass authentication if
         it appears to be a CORS preflight request; it is mapped to a web
         application that has the <a href="filter.html#CORS_Filter">CORS
-        Filter</a> enabled; and the CORS Filter is mapped to <code>/*</code>.
+        Filter</a> enabled; and the request matches the URLPatterns for the CORS
+        fitler mapper.
         <code>always</code> means that all requests that appear to be CORS
         preflight requests will bypass authentication. If not set, the default
         value is <code>never</code>.</p>
@@ -1791,7 +1790,8 @@
         <code>filter</code> means that a request will bypass authentication if
         it appears to be a CORS preflight request; it is mapped to a web
         application that has the <a href="filter.html#CORS_Filter">CORS
-        Filter</a> enabled; and the CORS Filter is mapped to <code>/*</code>.
+        Filter</a> enabled; and the request matches the URLPatterns for the CORS
+        fitler mapper.
         <code>always</code> means that all requests that appear to be CORS
         preflight requests will bypass authentication. If not set, the default
         value is <code>never</code>.</p>
@@ -1939,7 +1939,8 @@
         <code>filter</code> means that a request will bypass authentication if
         it appears to be a CORS preflight request; it is mapped to a web
         application that has the <a href="filter.html#CORS_Filter">CORS
-        Filter</a> enabled; and the CORS Filter is mapped to <code>/*</code>.
+        Filter</a> enabled; and the request matches the URLPatterns for the CORS
+        fitler mapper.
         <code>always</code> means that all requests that appear to be CORS
         preflight requests will bypass authentication. If not set, the default
         value is <code>never</code>.</p>
@@ -2054,7 +2055,8 @@
         <code>filter</code> means that a request will bypass authentication if
         it appears to be a CORS preflight request and the web application the
         request maps to has the <a href="filter.html#CORS_Filter">CORS
-        Filter</a> enabled and mapped to <code>/*</code>. <code>always</code>
+        Filter</a> enabled; and the request matches the URLPatterns for the CORS
+        fitler mapper.
         means that all requests that appear to be CORS preflight requests will
         bypass authentication. If not set, the default value is
         <code>never</code>.</p>
@@ -2555,6 +2557,13 @@
         <strong>false</strong>.</p>
       </attribute>
 
+      <attribute name="highConcurrencyStatus" required="false">
+        <p>The error status code which will be returned to the client, if the
+        value is positive, when a permit cannot be acquired from the
+        sepmaphore. The default value is <strong>-1</strong>, which will mean
+        no error status will be sent back.</p>
+      </attribute>
+
       <attribute name="interruptible" required="false">
         <p>Flag to determine if a thread may be interrupted until a permit is
         available. The default value is <strong>false</strong>.</p>
@@ -2655,6 +2664,49 @@
         for the Semaphore in the same order they were received. Has no effect if
         <strong>semaphoreBlockOnAcquire</strong> is <code>false</code>. If not
         specified, the default value of <code>true</code> will be used.</p>
+      </attribute>
+
+    </attributes>
+
+  </subsection>
+
+</section>
+
+<section name="Parameter Limit Valve">
+
+  <subsection name="Introduction">
+
+    <p>The <strong>Parameter Limit Valve</strong> is used to limit the number of parameters allowed in HTTP requests
+    overriding the Connector's value. The valve can be configured with specific limits for certain URL patterns.
+    Requests exceeding the defined parameter limits will result in an HTTP 400 Bad Request error.</p>
+
+  </subsection>
+
+  <subsection name="Attributes">
+
+    <p>The <strong>Parameter Limit Valve</strong> supports the following
+    configuration attributes:</p>
+
+    <attributes>
+
+      <attribute name="className" required="true">
+        <p>Java class name of the implementation to use.  This MUST be set to
+        <strong>org.apache.catalina.valves.ParameterLimitValve</strong>.</p>
+      </attribute>
+
+      <attribute name="resourcePath" required="false">
+        <p>A file consisting of line-separated URL patterns and their respective parameter limits.
+        Each entry should follow the format <code>urlPattern=limit</code>.
+        The valve will apply the limit defined for a URL pattern when a request matches that pattern.
+        If no pattern matches, the Connector's limit will be used.
+        For example:
+          <code>
+            /api/.*=100
+            /admin/.*=50
+          </code>
+        Default value: <code>parameter_limit.config</code>.
+        It must be placed in the Host configuration folder or in the WEB-INF folder of the web application.
+        </p>
       </attribute>
 
     </attributes>

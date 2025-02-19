@@ -17,14 +17,14 @@
 package org.apache.tomcat.util.compat;
 
 /**
- * This is the base implementation class for JRE compatibility and provides an
- * implementation based on Java 21. Sub-classes may extend this class and provide
- * alternative implementations for later JRE versions
+ * This is the base implementation class for JRE compatibility and provides an implementation based on Java 21.
+ * Sub-classes may extend this class and provide alternative implementations for later JRE versions
  */
 public class JreCompat {
 
     private static final JreCompat instance;
     private static final boolean graalAvailable;
+    private static final boolean jre24Available;
     private static final boolean jre22Available;
 
     static {
@@ -39,12 +39,19 @@ public class JreCompat {
         }
         graalAvailable = result || System.getProperty("org.graalvm.nativeimage.imagecode") != null;
 
-        // This is Tomcat 11.0.x with a minimum Java version of Java 21.
-        if (Jre22Compat.isSupported()) {
+        // This is Tomcat 12.0.x with a minimum Java version of Java 21.
+        // Look for the highest supported JVM first
+        if (Jre24Compat.isSupported()) {
+            instance = new Jre24Compat();
+            jre24Available = true;
+            jre22Available = true;
+        } else if (Jre22Compat.isSupported()) {
             instance = new Jre22Compat();
+            jre24Available = false;
             jre22Available = true;
         } else {
             instance = new JreCompat();
+            jre24Available = false;
             jre22Available = false;
         }
     }
@@ -65,4 +72,7 @@ public class JreCompat {
     }
 
 
+    public static boolean isJre24Available() {
+        return jre24Available;
+    }
 }

@@ -35,10 +35,6 @@ public abstract class ClusterListener implements ChannelListener {
 
     // --Instance Variables--------------------------------------
 
-    /**
-     * The string manager for this package.
-     */
-
     protected CatalinaCluster cluster = null;
 
     // --Constructor---------------------------------------------
@@ -54,11 +50,11 @@ public abstract class ClusterListener implements ChannelListener {
     }
 
     public void setCluster(CatalinaCluster cluster) {
-        if (log.isDebugEnabled()) {
+        if (log.isTraceEnabled()) {
             if (cluster != null) {
-                log.debug("add ClusterListener " + this.toString() + " to cluster" + cluster);
+                log.trace("add ClusterListener " + this.toString() + " to cluster" + cluster);
             } else {
-                log.debug("remove ClusterListener " + this.toString() + " from cluster");
+                log.trace("remove ClusterListener " + this.toString() + " from cluster");
             }
         }
         this.cluster = cluster;
@@ -86,17 +82,17 @@ public abstract class ClusterListener implements ChannelListener {
      * Callback from the cluster, when a message is received, The cluster will broadcast it invoking the messageReceived
      * on the receiver.
      *
-     * @param msg ClusterMessage - the message received from the cluster
+     * @param msg the message received from the cluster
      */
     public abstract void messageReceived(ClusterMessage msg);
 
 
     /**
-     * Accept only SessionIDMessages
+     * Accept only a certain type of messages.
      *
-     * @param msg ClusterMessage
+     * @param msg the message
      *
-     * @return boolean - returns true to indicate that messageReceived should be invoked. If false is returned, the
+     * @return {@code true} to indicate that messageReceived should be invoked. If {@code false} is returned, the
      *             messageReceived method will not be invoked.
      */
     public abstract boolean accept(ClusterMessage msg);

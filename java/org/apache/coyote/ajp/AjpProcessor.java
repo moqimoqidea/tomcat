@@ -89,7 +89,7 @@ public class AjpProcessor extends AbstractProcessor {
     private static final byte[] pongMessageArray;
 
 
-    private static final Map<String, String> jakartaAttributeMapping;
+    private static final Map<String,String> jakartaAttributeMapping;
     private static final Set<String> iisTlsAttributes;
 
 
@@ -131,7 +131,8 @@ public class AjpProcessor extends AbstractProcessor {
         System.arraycopy(pongMessage.getBuffer(), 0, pongMessageArray, 0, pongMessage.getLen());
 
         // Build Map of Java Servlet to Jakarta Servlet attribute names
-        Map<String, String> m = new HashMap<>();
+        Map<String,String> m = new HashMap<>();
+        m.put("jakarta.servlet.request.secure_protocol", "jakarta.servlet.request.secure_protocol");
         m.put("jakarta.servlet.request.cipher_suite", "jakarta.servlet.request.cipher_suite");
         m.put("jakarta.servlet.request.key_size", "jakarta.servlet.request.key_size");
         m.put("jakarta.servlet.request.ssl_session", "jakarta.servlet.request.ssl_session");
@@ -376,7 +377,7 @@ public class AjpProcessor extends AbstractProcessor {
                         socketWrapper.flush(true);
                     } catch (IOException e) {
                         if (getLog().isDebugEnabled()) {
-                            getLog().debug("Pong message failed", e);
+                            getLog().debug(sm.getString("ajpprocessor.pongFail"), e);
                         }
                         setErrorState(ErrorState.CLOSE_CONNECTION_NOW, e);
                     }
@@ -386,7 +387,7 @@ public class AjpProcessor extends AbstractProcessor {
                     // Unexpected packet type. Unread body packets should have
                     // been swallowed in finish().
                     if (getLog().isDebugEnabled()) {
-                        getLog().debug("Unexpected message: " + type);
+                        getLog().debug(sm.getString("ajpprocessor.unexpectedMessage", Integer.toString(type)));
                     }
                     setErrorState(ErrorState.CLOSE_CONNECTION_NOW, null);
                     break;
@@ -643,6 +644,7 @@ public class AjpProcessor extends AbstractProcessor {
     /**
      * After reading the request headers, we have to setup the request filters.
      */
+    @SuppressWarnings("deprecation")
     private void prepareRequest() {
 
         // Translate the HTTP method code to a String.
@@ -720,7 +722,7 @@ public class AjpProcessor extends AbstractProcessor {
             } else if (hId == Constants.SC_REQ_CONTENT_TYPE || (hId == -1 && tmpMB.equalsIgnoreCase("Content-Type"))) {
                 // just read the content-type header, so set it
                 ByteChunk bchunk = vMB.getByteChunk();
-                request.contentType().setBytes(bchunk.getBytes(), bchunk.getOffset(), bchunk.getLength());
+                request.contentType().setBytes(bchunk.getBytes(), bchunk.getStart(), bchunk.getLength());
             }
         }
 
@@ -751,6 +753,7 @@ public class AjpProcessor extends AbstractProcessor {
                             // Ignore invalid value
                         }
                     } else if (n.equals(Constants.SC_A_SSL_PROTOCOL)) {
+                        request.setAttribute(SSLSupport.SECURE_PROTOCOL_KEY, v);
                         request.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, v);
                     } else if (n.equals("JK_LB_ACTIVATION")) {
                         request.setAttribute(n, v);
@@ -798,11 +801,12 @@ public class AjpProcessor extends AbstractProcessor {
                     break;
 
                 case Constants.SC_A_AUTH_TYPE:
-                    if (protocol.getTomcatAuthentication()) {
-                        // ignore server
-                        requestHeaderMessage.getBytes(tmpMB);
-                    } else {
+                    if (protocol.getTomcatAuthorization() || !protocol.getTomcatAuthentication()) {
+                        // Implies tomcatAuthentication == false
                         requestHeaderMessage.getBytes(request.getAuthType());
+                    } else {
+                        // Ignore user information from reverse proxy
+                        requestHeaderMessage.getBytes(tmpMB);
                     }
                     break;
 
@@ -990,8 +994,8 @@ public class AjpProcessor extends AbstractProcessor {
                     responseMessage.appendBytes(hV);
                 } catch (IllegalArgumentException iae) {
                     // Log the problematic header
-                    log.warn(sm.getString("ajpprocessor.response.invalidHeader", headers.getName(i), headers.getValue(i)),
-                            iae);
+                    log.warn(sm.getString("ajpprocessor.response.invalidHeader", headers.getName(i),
+                            headers.getValue(i)), iae);
                     // Remove the problematic header
                     headers.removeHeader(i);
                     numHeaders--;
@@ -1009,9 +1013,6 @@ public class AjpProcessor extends AbstractProcessor {
     }
 
 
-    /**
-     * Callback to write data from the buffer.
-     */
     @Override
     protected final void flush() throws IOException {
         // Calling code should ensure that there is no data in the buffers for
@@ -1027,9 +1028,6 @@ public class AjpProcessor extends AbstractProcessor {
     }
 
 
-    /**
-     * Finish AJP response.
-     */
     @Override
     protected final void finishResponse() throws IOException {
         if (responseFinished) {
@@ -1055,6 +1053,12 @@ public class AjpProcessor extends AbstractProcessor {
 
     @Override
     protected final void ack(ContinueResponseTiming continueResponseTiming) {
+        // NO-OP for AJP
+    }
+
+
+    @Override
+    protected void earlyHints() throws IOException {
         // NO-OP for AJP
     }
 

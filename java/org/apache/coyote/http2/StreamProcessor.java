@@ -18,6 +18,7 @@ package org.apache.coyote.http2;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -25,6 +26,7 @@ import java.util.Set;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
+import jakarta.servlet.RequestDispatcher;
 import jakarta.servlet.ServletConnection;
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -33,6 +35,7 @@ import org.apache.coyote.ActionCode;
 import org.apache.coyote.Adapter;
 import org.apache.coyote.ContinueResponseTiming;
 import org.apache.coyote.ErrorState;
+import org.apache.coyote.NonPipeliningProcessor;
 import org.apache.coyote.Request;
 import org.apache.coyote.RequestGroupInfo;
 import org.apache.coyote.Response;
@@ -50,7 +53,7 @@ import org.apache.tomcat.util.net.SocketEvent;
 import org.apache.tomcat.util.net.SocketWrapperBase;
 import org.apache.tomcat.util.res.StringManager;
 
-class StreamProcessor extends AbstractProcessor {
+class StreamProcessor extends AbstractProcessor implements NonPipeliningProcessor {
 
     private static final Log log = LogFactory.getLog(StreamProcessor.class);
     private static final StringManager sm = StringManager.getManager(StreamProcessor.class);
@@ -83,6 +86,15 @@ class StreamProcessor extends AbstractProcessor {
             // Note: The regular processor uses the socketWrapper lock, but using that here triggers a deadlock
             processLock.lock();
             try {
+                /*
+                 * In some scenarios, error handling may trigger multiple ERROR events for the same stream. The first
+                 * ERROR event processed will close the stream, replace it and recycle it. Once the stream has been
+                 * replaced it should not be used for processing any further events. When it is known that processing is
+                 * going to be a NO-OP, exit early.
+                 */
+                if (!stream.equals(handler.getStream(stream.getIdAsInt()))) {
+                    return;
+                }
                 // HTTP/2 equivalent of AbstractConnectionHandler#process() without the
                 // socket <-> processor mapping
                 SocketState state = SocketState.CLOSED;
@@ -119,8 +131,8 @@ class StreamProcessor extends AbstractProcessor {
                             stream.close(se);
                         } else {
                             if (!stream.isActive()) {
-                                // stream.close() will call recycle so only need it here
-                                stream.recycle();
+                                // Close calls replace() so need the same call here
+                                stream.replace();
                             }
                         }
                     }
@@ -135,6 +147,7 @@ class StreamProcessor extends AbstractProcessor {
                     state = SocketState.CLOSED;
                 } finally {
                     if (state == SocketState.CLOSED) {
+                        stream.recycle();
                         recycle();
                     }
                 }
@@ -231,11 +244,17 @@ class StreamProcessor extends AbstractProcessor {
             headers.addValue("date").setString(FastHttpDateFormat.getCurrentDate());
         }
 
-        // Exclude some HTTP header fields where the value is determined only
-        // while generating the content as per section 9.3.2 of RFC 9110.
-        if (coyoteRequest != null && "HEAD".equals(coyoteRequest.method().toString())) {
-            headers.removeHeader("content-length");
-            headers.removeHeader("content-range");
+        // Server header
+        if (protocol != null) {
+            String server = protocol.getHttp11Protocol().getServer();
+            if (server == null) {
+                if (protocol.getHttp11Protocol().getServerRemoveAppProvidedValues()) {
+                    headers.removeHeader("server");
+                }
+            } else {
+                // server always overrides anything the app might set
+                headers.setValue("Server").setString(server);
+            }
         }
     }
 
@@ -263,6 +282,12 @@ class StreamProcessor extends AbstractProcessor {
                 }
             }
         }
+    }
+
+
+    @Override
+    protected void earlyHints() throws IOException {
+        stream.writeEarlyHints();
     }
 
 
@@ -357,23 +382,6 @@ class StreamProcessor extends AbstractProcessor {
              * Streams may progress concurrently.
              */
             processSocketEvent(dispatchType.getSocketStatus(), true);
-        }
-    }
-
-
-    @Override
-    protected final boolean isPushSupported() {
-        return stream.isPushSupported();
-    }
-
-
-    @Override
-    protected final void doPush(Request pushTarget) {
-        try {
-            stream.push(pushTarget);
-        } catch (IOException ioe) {
-            setErrorState(ErrorState.CLOSE_CONNECTION_NOW, ioe);
-            response.setErrorException(ioe);
         }
     }
 
@@ -482,8 +490,7 @@ class StreamProcessor extends AbstractProcessor {
      * The checks performed below are based on the checks in Http11InputBuffer.
      */
     private boolean validateRequest() {
-        HttpParser httpParser = new HttpParser(handler.getProtocol().getHttp11Protocol().getRelaxedPathChars(),
-                handler.getProtocol().getHttp11Protocol().getRelaxedQueryChars());
+        HttpParser httpParser = handler.getProtocol().getHttp11Protocol().getHttpParser();
 
         // Method name must be a token
         String method = request.method().toString();
@@ -534,8 +541,8 @@ class StreamProcessor extends AbstractProcessor {
 
     @Override
     protected final boolean flushBufferedWrite() throws IOException {
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("streamProcessor.flushBufferedWrite.entry", stream.getConnectionId(),
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("streamProcessor.flushBufferedWrite.entry", stream.getConnectionId(),
                     stream.getIdAsString()));
         }
         if (stream.flush(false)) {
@@ -559,5 +566,23 @@ class StreamProcessor extends AbstractProcessor {
     @Override
     protected final SocketState dispatchEndRequest() throws IOException {
         return SocketState.CLOSED;
+    }
+
+
+    /**
+     * {@inheritDoc}
+     * <p>
+     * First checks for a stream read timeout and processes it if detected. If no stream read timeout is detected then
+     * the superclass is called to check for an asynchronous processing timeout.
+     */
+    @Override
+    public void timeoutAsync(long now) {
+        if (stream.getInputBuffer().timeoutRead(now)) {
+            stream.getCoyoteRequest().setAttribute(RequestDispatcher.ERROR_EXCEPTION,
+                    new SocketTimeoutException(sm.getString("streamProcessor.streamReadTimeout")));
+            processSocketEvent(SocketEvent.ERROR, true);
+        } else {
+            super.timeoutAsync(now);
+        }
     }
 }

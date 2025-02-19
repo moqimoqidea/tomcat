@@ -41,6 +41,8 @@ public class Rfc6265CookieProcessor extends CookieProcessorBase {
     private static final StringManager sm =
             StringManager.getManager(Rfc6265CookieProcessor.class.getPackage().getName());
 
+    private static final String EMPTY_STRING = "";
+
     private static final BitSet domainValid = new BitSet(128);
 
     static {
@@ -82,16 +84,17 @@ public class Rfc6265CookieProcessor extends CookieProcessorBase {
                     if (log.isDebugEnabled()) {
                         Exception e = new Exception();
                         // TODO: Review this in light of HTTP/2
-                        log.debug("Cookies: Parsing cookie as String. Expected bytes.", e);
+                        log.debug(sm.getString("rfc6265CookieProcessor.expectedBytes"), e);
                     }
                     cookieValue.toBytes();
                 }
-                if (log.isDebugEnabled()) {
-                    log.debug("Cookies: Parsing b[]: " + cookieValue.toString());
+                if (log.isTraceEnabled()) {
+                    log.trace("Cookies: Parsing b[]: " + cookieValue.toString());
                 }
                 ByteChunk bc = cookieValue.getByteChunk();
 
-                Cookie.parseCookie(bc.getBytes(), bc.getOffset(), bc.getLength(), serverCookies);
+                Cookie.parseCookie(bc.getBytes(), bc.getStart(), bc.getLength(), serverCookies,
+                        getCookiesWithoutEqualsInternal());
             }
 
             // search from the next position
@@ -119,27 +122,27 @@ public class Rfc6265CookieProcessor extends CookieProcessorBase {
             header.append(value);
         }
 
-        // RFC 6265 prefers Max-Age to Expires but... (see below)
+        /*
+         *  RFC 6265 prefers Max-Age to Expires but some browsers including Microsoft IE and Microsoft Edge don't
+         *  understand Max-Age so send expires as well. Without this, persistent cookies fail with those browsers.
+         */
         int maxAge = cookie.getMaxAge();
+
+        // Negative Max-Age is equivalent to no Max-Age
         if (maxAge > -1) {
-            // Negative Max-Age is equivalent to no Max-Age
-            header.append("; Max-Age=");
-            header.append(maxAge);
-
-            // Microsoft IE and Microsoft Edge don't understand Max-Age so send
-            // expires as well. Without this, persistent cookies fail with those
-            // browsers. See http://tomcat.markmail.org/thread/g6sipbofsjossacn
-
-            // Wdy, DD-Mon-YY HH:MM:SS GMT ( Expires Netscape format )
             header.append("; Expires=");
-            // To expire immediately we need to set the time in past
             if (maxAge == 0) {
+                // To expire immediately we need to set the time in past
                 header.append(ANCIENT_DATE);
             } else {
-                COOKIE_DATE_FORMAT.get().format(new Date(System.currentTimeMillis() + maxAge * 1000L), header,
-                        new FieldPosition(0));
+                COOKIE_DATE_FORMAT.get().format(
+                        new Date(System.currentTimeMillis() + maxAge * 1000L), header, new FieldPosition(0));
+
+                header.append("; Max-Age=");
+                header.append(maxAge);
             }
         }
+
 
         String domain = cookie.getDomain();
         if (domain != null && domain.length() > 0) {
@@ -177,6 +180,18 @@ public class Rfc6265CookieProcessor extends CookieProcessorBase {
             header.append(cookieSameSite);
         }
 
+        String cookiePartitioned = cookie.getAttribute(Constants.COOKIE_PARTITIONED_ATTR);
+        if (cookiePartitioned == null) {
+            if (getPartitioned()) {
+                header.append("; Partitioned");
+            }
+        } else {
+            if (EMPTY_STRING.equals(cookiePartitioned)) {
+                header.append("; Partitioned");
+            }
+        }
+
+
         // Add the remaining attributes
         for (Map.Entry<String,String> entry : cookie.getAttributes().entrySet()) {
             switch (entry.getKey()) {
@@ -187,14 +202,17 @@ public class Rfc6265CookieProcessor extends CookieProcessorBase {
                 case Constants.COOKIE_SECURE_ATTR:
                 case Constants.COOKIE_HTTP_ONLY_ATTR:
                 case Constants.COOKIE_SAME_SITE_ATTR:
+                case Constants.COOKIE_PARTITIONED_ATTR:
                     // Handled above so NO-OP
                     break;
                 default: {
                     validateAttribute(entry.getKey(), entry.getValue());
                     header.append("; ");
                     header.append(entry.getKey());
-                    header.append('=');
-                    header.append(entry.getValue());
+                    if (!EMPTY_STRING.equals(entry.getValue())) {
+                        header.append('=');
+                        header.append(entry.getValue());
+                    }
                 }
             }
         }

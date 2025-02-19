@@ -133,7 +133,7 @@
       <p>The examples web application should always be removed from any security
       sensitive installation. While the examples web application does not
       contain any known vulnerabilities, it is known to contain features
-      (particularly the cookie examples that display the contents of all
+      (particularly the cookie examples that display the contents of all cookies
       received and allow new cookies to be set) that may be used by an attacker
       in conjunction with a vulnerability in another application deployed on the
       Tomcat instance to obtain additional information that would otherwise be
@@ -216,8 +216,11 @@
       <p>By default, a non-TLS, HTTP/1.1 connector is configured on port 8080.
       Connectors that will not be used should be removed from server.xml.</p>
 
-      <p>AJP Connectors should only be used on trusted networks or be
-      appropriately secured with a suitable <code>secret</code> attribute.</p>
+      <p>AJP is a clear text protocol. AJP Connectors should normally only be
+      used on trusted networks. If used on an untrusted network, use of the
+      <code>secret</code> attribute will limit access to authorised clients but
+      the <code>secret</code> attribute will be visible to anyone who can
+      observe network traffic.</p>
 
       <p>AJP Connectors block forwarded requests with unknown request
       attributes. Known safe and/or expected attributes may be allowed by
@@ -379,6 +382,15 @@
       (<code>$CATALINA_BASE/temp</code> by default). This location should be
       secured with appropriate file permissions - typically read/write for the
       Tomcat user and no access for other users.</p>
+
+      <p>When <strong>mapperContextRootRedirectEnabled</strong> and/or
+      <strong>mapperDirectoryRedirectEnabled</strong> are enabled, request
+      processing will be more efficient but there are security side effects.
+      First, the existance of a web application or a directory may be confirmed
+      even though the user does not have access to that directory. Secondly, any
+      Valves and/or Filters - including those providing security functionality -
+      will not have an opportunity to process the request.</p>
+
     </subsection>
 
     <subsection name="Valves">
@@ -531,6 +543,10 @@
     headers it sets unless your application is already setting them. If Tomcat
     is accessed via a reverse proxy, then the configuration of this filter needs
     to be co-ordinated with any headers that the reverse proxy sets.</p>
+
+    <p>The WebDAV servlet enables edit functionality for web application
+    content. If the WebDAV servlet is enabled, the WebDAV functionality should
+    be appropriately secured.</p>
   </section>
 
   <section name="Embedded Tomcat">

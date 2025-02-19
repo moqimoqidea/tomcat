@@ -195,11 +195,6 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
 
     // ---------------------------------------------- LifecycleListener Methods
 
-    /**
-     * Acknowledge the occurrence of the specified event.
-     *
-     * @param event LifecycleEvent that has occurred
-     */
     @Override
     public void lifecycleEvent(LifecycleEvent event) {
 
@@ -228,7 +223,7 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
                 ContextAccessController.setSecurityToken(container, token);
                 ContextBindings.bindContext(container, namingContext, token);
                 if (log.isDebugEnabled()) {
-                    log.debug("Bound " + container);
+                    log.debug(sm.getString("naming.bind", container));
                 }
 
                 // Configure write when read-only behaviour
@@ -258,7 +253,7 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
                 }
 
                 if (container instanceof Server) {
-                    org.apache.naming.factory.ResourceLinkFactory.setGlobalContext(namingContext);
+                    ResourceLinkFactory.setGlobalContext(namingContext);
                     try {
                         ContextBindings.bindClassLoader(container, token, this.getClass().getClassLoader());
                     } catch (NamingException e) {
@@ -329,11 +324,6 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
     // ----------------------------------------- PropertyChangeListener Methods
 
 
-    /**
-     * Process property change events.
-     *
-     * @param event The property change event that has occurred
-     */
     @Override
     public void propertyChange(PropertyChangeEvent event) {
 
@@ -496,8 +486,8 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
 
         int i;
 
-        if (log.isDebugEnabled()) {
-            log.debug("Creating JNDI naming context");
+        if (log.isTraceEnabled()) {
+            log.trace("Creating JNDI naming context");
         }
 
         if (namingResources == null) {
@@ -825,7 +815,9 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
                 if (wsdlURL == null) {
                     try {
                         wsdlURL = ((Context) container).getServletContext().getResource("/" + service.getWsdlfile());
-                        log.debug("  Changing service ref wsdl file for /" + service.getWsdlfile());
+                        if (log.isDebugEnabled()) {
+                            log.debug(sm.getString("naming.addSlash", service.getWsdlfile()));
+                        }
                     } catch (MalformedURLException e) {
                         log.error(sm.getString("naming.wsdlFailed", e));
                     }
@@ -858,7 +850,9 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
                     try {
                         jaxrpcURL = ((Context) container).getServletContext()
                                 .getResource("/" + service.getJaxrpcmappingfile());
-                        log.debug("  Changing service ref jaxrpc file for /" + service.getJaxrpcmappingfile());
+                        if (log.isDebugEnabled()) {
+                            log.debug(sm.getString("naming.addSlash", service.getJaxrpcmappingfile()));
+                        }
                     } catch (MalformedURLException e) {
                         log.error(sm.getString("naming.wsdlFailed", e));
                     }
@@ -916,7 +910,7 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
 
         try {
             if (log.isDebugEnabled()) {
-                log.debug("  Adding service ref " + service.getName() + "  " + ref);
+                log.debug(sm.getString("naming.addService", ref, service.getName()));
             }
             createSubcontexts(envCtx, service.getName());
             envCtx.bind(service.getName(), ref);
@@ -951,7 +945,7 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
 
         try {
             if (log.isDebugEnabled()) {
-                log.debug("  Adding resource ref " + resource.getName() + "  " + ref);
+                log.debug(sm.getString("naming.addResourceRef", ref, resource.getName()));
             }
             createSubcontexts(envCtx, resource.getName());
             envCtx.bind(resource.getName(), ref);
@@ -1035,7 +1029,7 @@ public class NamingContextListener implements LifecycleListener, PropertyChangeL
         javax.naming.Context ctx = "UserTransaction".equals(resourceLink.getName()) ? compCtx : envCtx;
         try {
             if (log.isDebugEnabled()) {
-                log.debug("  Adding resource link " + resourceLink.getName());
+                log.debug(sm.getString("naming.addResourceLink", resourceLink.getName()));
             }
             createSubcontexts(envCtx, resourceLink.getName());
             ctx.bind(resourceLink.getName(), ref);

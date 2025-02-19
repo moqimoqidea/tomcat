@@ -30,6 +30,7 @@ import java.nio.channels.AsynchronousSocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -66,7 +67,6 @@ import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.InstanceManager;
 import org.apache.tomcat.InstanceManagerBindings;
 import org.apache.tomcat.util.buf.StringUtils;
-import org.apache.tomcat.util.codec.binary.Base64;
 import org.apache.tomcat.util.collections.CaseInsensitiveKeyMap;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -178,8 +178,8 @@ public class WsWebSocketContainer implements WebSocketContainer, BackgroundProce
             ClientEndpointConfig clientEndpointConfiguration, URI path, Set<URI> redirectSet)
             throws DeploymentException {
 
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("wsWebSocketContainer.connect.entry", clientEndpointHolder.getClassName(), path));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("wsWebSocketContainer.connect.entry", clientEndpointHolder.getClassName(), path));
         }
 
         boolean secure = false;
@@ -314,14 +314,14 @@ public class WsWebSocketContainer implements WebSocketContainer, BackgroundProce
             Future<Void> fHandshake = channel.handshake();
             fHandshake.get(timeout, TimeUnit.MILLISECONDS);
 
-            if (log.isDebugEnabled()) {
+            if (log.isTraceEnabled()) {
                 SocketAddress localAddress = null;
                 try {
                     localAddress = channel.getLocalAddress();
                 } catch (IOException ioe) {
                     // Ignore
                 }
-                log.debug(sm.getString("wsWebSocketContainer.connect.write", Integer.valueOf(request.position()),
+                log.trace(sm.getString("wsWebSocketContainer.connect.write", Integer.valueOf(request.position()),
                         Integer.valueOf(request.limit()), localAddress));
             }
             writeRequest(channel, request, timeout);
@@ -352,7 +352,7 @@ public class WsWebSocketContainer implements WebSocketContainer, BackgroundProce
                         redirectLocation = path.resolve(redirectLocation);
                     }
 
-                    String redirectScheme = redirectLocation.getScheme().toLowerCase();
+                    String redirectScheme = redirectLocation.getScheme().toLowerCase(Locale.ENGLISH);
 
                     if (redirectScheme.startsWith("http")) {
                         redirectLocation = new URI(redirectScheme.replace("http", "ws"), redirectLocation.getUserInfo(),
@@ -604,7 +604,12 @@ public class WsWebSocketContainer implements WebSocketContainer, BackgroundProce
         synchronized (endPointSessionMapLock) {
             Set<WsSession> sessions = endpointSessionMap.get(key);
             if (sessions != null) {
-                result.addAll(sessions);
+                // Some sessions may be in the process of closing
+                for (WsSession session : sessions) {
+                    if (session.isOpen()) {
+                        result.add(session);
+                    }
+                }
             }
         }
         return result;
@@ -692,7 +697,7 @@ public class WsWebSocketContainer implements WebSocketContainer, BackgroundProce
     private static String generateWsKeyValue() {
         byte[] keyBytes = new byte[16];
         RANDOM.nextBytes(keyBytes);
-        return Base64.encodeBase64String(keyBytes);
+        return Base64.getEncoder().encodeToString(keyBytes);
     }
 
 
@@ -1019,8 +1024,10 @@ public class WsWebSocketContainer implements WebSocketContainer, BackgroundProce
         if (backgroundProcessCount >= processPeriod) {
             backgroundProcessCount = 0;
 
+            // Check all registered sessions.
             for (WsSession wsSession : sessions.keySet()) {
                 wsSession.checkExpiration();
+                wsSession.checkCloseTimeout();
             }
         }
 

@@ -291,6 +291,13 @@
         request. The default value is <code>403</code>.</p>
       </attribute>
 
+      <attribute name="enforce" required="false">
+        <p>A flag to enable or disable enforcement. When enforcement is
+        disabled, the CsrfPreventionFilter will <i>allow all requests</i> and
+        log CSRF failures as DEBUG messages. The default is <b>true</b>,
+        enabling the enforcement of CSRF protection.</p>
+      </attribute>
+
       <attribute name="entryPoints" required="false">
         <p>A comma separated list of URLs that will not be tested for the
         presence of a valid nonce. They are used to provide a way to navigate
@@ -319,6 +326,41 @@
         of <code>java.security.SecureRandom</code> will be used.</p>
       </attribute>
 
+      <attribute name="noNonceURLPatterns" required="false">
+        <p>A list of URL patterns that will <i>not</i> have CSRF nonces added
+        to them. You may not want to add nonces to certain URLs to avoid
+        creating unique URLs which may defeat resource caching, etc.</p>
+
+        <p>There are several types of patterns supported:</p>
+
+        <ul>
+          <li>Prefix matches using a pattern that ends with a <code>*</code>.
+          For example, <code>/images/*</code>.</li>
+
+          <li>Suffix matches using a pattern that begins with a <code>*</code>.
+          For example, <code>*.css</code>.</li>
+
+          <li>Mime-type matches which begin with <code>mime:</code> and specify
+          one of the above matches which will be checked against the MIME type
+          of the URL filename. For example, <code>mime:image/*</code>.
+          Note that the MIME-type will be determined using
+          <code>ServletContext.getMimeType</code>.</li>
+
+          <li>A single complete regular expression pattern which begins and
+          ends with <code>/</code> (slash / solidus) symbols. For example
+          <code>//images/.*|/scripts/.*/</code>. The leading and trailing
+          <code>/</code> characters will be removed from the pattern before
+          being compiled. Note that there can be only a single pattern,
+          but that pattern can of course have as many alternatives as desired
+          by using the regular expression <code>|</code> (<code>OR</code>)
+          operator. The regular expression will be matched against the entire
+          URL (i.e. <i>match</i> not <i>find</i> semantics), and the regex
+          dialect is Java (<code>java.util.regex.Pattern</code>).
+          </li>
+        </ul>
+
+        <p>The default is <code>*.css, *.js, *.gif, *.png, *.jpg, *.svg, *.ico, *.jpeg, *.mjs</code>.</p>
+      </attribute>
     </attributes>
 
   </subsection>
@@ -947,6 +989,11 @@ FINE: Request "/docs/config/manager.html" with response status "200"
     how to handle the request based on other information that it has, e.g. allow
     more requests to certain users based on roles, etc.</p>
 
+    <p><code>exposeHeaders</code> enables the output of the rate limiter
+    configuration and state via an HTTP response header as per <a
+    href="https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers">RateLimit
+    header fields for HTTP (draft)</a>.</p>
+
     <p><strong>WARNING:</strong> if Tomcat is behind a reverse proxy then you must
     make sure that the Rate Limit Filter sees the client IP address, so if for
     example you are using the <a href="#Remote_IP_Filter">Remote IP Filter</a>,
@@ -989,6 +1036,18 @@ FINE: Request "/docs/config/manager.html" with response status "200"
         org.apache.catalina.filters.RateLimitFilter.Count to retrieve
         the number of Requests made from that IP within the time window.
         Default is <code>true</code>.</p>
+      </attribute>
+
+      <attribute name="exposeHeaders" required="false">
+        <p>Set to true to expose the configuration and state of the rate limiter
+        via an HTTP response header as per <a
+        href="https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers">RateLimit
+        header fields for HTTP (draft)</a>. Default is <code>false</code>.</p>
+      </attribute>
+
+      <attribute name="rateLimitClassName" required="false">
+        <p>The full class name of an implementation of the RateLimiter interface.
+        Default is &quot;org.apache.catalina.util.FastRateLimiter&quot;.</p>
       </attribute>
 
       <attribute name="statusCode" required="false">
@@ -1388,7 +1447,7 @@ FINE: Request "/docs/config/manager.html" with response status "200"
        <filter-name>RemoteIpFilter</filter-name>
        <filter-class>org.apache.catalina.filters.RemoteIpFilter</filter-class>
        <init-param>
-         <param-name>allowedInternalProxies</param-name>
+         <param-name>internalProxies</param-name>
          <param-value>192\.168\.0\.10|192\.168\.0\.11</param-value>
        </init-param>
        <init-param>
@@ -1403,7 +1462,13 @@ FINE: Request "/docs/config/manager.html" with response status "200"
          <param-name>protocolHeader</param-name>
          <param-value>x-forwarded-proto</param-value>
        </init-param>
-     </filter>]]></source>
+     </filter>
+
+     <filter-mapping>
+       <filter-name>RemoteIpFilter</filter-name>
+       <url-pattern>/*</url-pattern>
+       <dispatcher>REQUEST</dispatcher>
+     </filter-mapping>]]></source>
     <p>Request values:</p>
     <table class="defaultTable">
       <tr>
@@ -1463,7 +1528,7 @@ FINE: Request "/docs/config/manager.html" with response status "200"
        <filter-name>RemoteIpFilter</filter-name>
        <filter-class>org.apache.catalina.filters.RemoteIpFilter</filter-class>
        <init-param>
-         <param-name>allowedInternalProxies</param-name>
+         <param-name>internalProxies</param-name>
          <param-value>192\.168\.0\.10|192\.168\.0\.11</param-value>
        </init-param>
        <init-param>
@@ -1478,7 +1543,13 @@ FINE: Request "/docs/config/manager.html" with response status "200"
          <param-name>trustedProxies</param-name>
          <param-value>proxy1|proxy2</param-value>
        </init-param>
-     </filter>]]></source>
+     </filter>
+
+     <filter-mapping>
+       <filter-name>RemoteIpFilter</filter-name>
+       <url-pattern>/*</url-pattern>
+       <dispatcher>REQUEST</dispatcher>
+     </filter-mapping>]]></source>
     <p>Request values:</p>
     <table class="defaultTable">
       <tr>
@@ -1517,7 +1588,7 @@ FINE: Request "/docs/config/manager.html" with response status "200"
        <filter-name>RemoteIpFilter</filter-name>
        <filter-class>org.apache.catalina.filters.RemoteIpFilter</filter-class>
        <init-param>
-         <param-name>allowedInternalProxies</param-name>
+         <param-name>internalProxies</param-name>
          <param-value>192\.168\.0\.10|192\.168\.0\.11</param-value>
        </init-param>
        <init-param>
@@ -1532,7 +1603,13 @@ FINE: Request "/docs/config/manager.html" with response status "200"
          <param-name>trustedProxies</param-name>
          <param-value>proxy1|proxy2</param-value>
        </init-param>
-     </filter>]]></source>
+     </filter>
+
+     <filter-mapping>
+       <filter-name>RemoteIpFilter</filter-name>
+       <url-pattern>/*</url-pattern>
+       <dispatcher>REQUEST</dispatcher>
+     </filter-mapping>]]></source>
     <p>Request values:</p>
     <table class="defaultTable">
       <tr>
@@ -1574,7 +1651,7 @@ FINE: Request "/docs/config/manager.html" with response status "200"
        <filter-name>RemoteIpFilter</filter-name>
        <filter-class>org.apache.catalina.filters.RemoteIpFilter</filter-class>
        <init-param>
-         <param-name>allowedInternalProxies</param-name>
+         <param-name>internalProxies</param-name>
          <param-value>192\.168\.0\.10|192\.168\.0\.11</param-value>
        </init-param>
        <init-param>
@@ -1589,7 +1666,13 @@ FINE: Request "/docs/config/manager.html" with response status "200"
          <param-name>trustedProxies</param-name>
          <param-value>proxy1|proxy2</param-value>
        </init-param>
-     </filter>]]></source>
+     </filter>
+
+     <filter-mapping>
+       <filter-name>RemoteIpFilter</filter-name>
+       <url-pattern>/*</url-pattern>
+       <dispatcher>REQUEST</dispatcher>
+     </filter-mapping>]]></source>
     <p>Request values:</p>
     <table class="defaultTable">
       <tr>
@@ -1891,36 +1974,6 @@ org.apache.catalina.filters.RequestDumperFilter.handlers = \
       </attribute>
 
     </attributes>
-
-  </subsection>
-
-</section>
-
-
-<section name="WebDAV Fix Filter">
-
-  <subsection name="Introduction">
-
-    <p>Microsoft operating systems have two WebDAV clients. One is used with
-    port 80, the other is used for all other ports. The implementation used with
-    port 80 does not adhere to the WebDAV specification and fails when trying to
-    communicate with the Tomcat WebDAV Servlet. This Filter provides a fix for
-    this by forcing the use of the WebDAV implementation that works, even when
-    connecting via port 80.</p>
-
-  </subsection>
-
-  <subsection name="Filter Class Name">
-
-    <p>The filter class name for the WebDAV Fix Filter is
-    <strong><code>org.apache.catalina.filters.WebdavFixFilter</code>
-    </strong>.</p>
-
-  </subsection>
-
-  <subsection name="Initialisation parameters">
-
-    <p>The WebDAV Fix Filter does not support any initialization parameters.</p>
 
   </subsection>
 

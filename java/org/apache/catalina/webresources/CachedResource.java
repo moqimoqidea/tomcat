@@ -32,7 +32,6 @@ import java.security.cert.Certificate;
 import java.text.Collator;
 import java.util.Arrays;
 import java.util.Locale;
-import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 
@@ -40,7 +39,9 @@ import org.apache.catalina.WebResource;
 import org.apache.catalina.WebResourceRoot;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.buf.HexUtils;
 import org.apache.tomcat.util.res.StringManager;
+import org.apache.tomcat.util.security.ConcurrentMessageDigest;
 
 /**
  * This class is designed to wrap a 'raw' WebResource and providing caching for expensive operations. Inexpensive
@@ -74,6 +75,7 @@ public class CachedResource implements WebResource {
     private volatile Boolean cachedExists = null;
     private volatile Boolean cachedIsVirtual = null;
     private volatile Long cachedContentLength = null;
+    private volatile String cachedStrongETag = null;
 
 
     public CachedResource(Cache cache, StandardRoot root, String path, long ttl, int objectMaxSizeBytes,
@@ -82,6 +84,7 @@ public class CachedResource implements WebResource {
         this.root = root;
         this.webAppPath = path;
         this.ttl = ttl;
+        nextCheck = ttl + System.currentTimeMillis();
         this.objectMaxSizeBytes = objectMaxSizeBytes;
         this.usesClassLoaderResources = usesClassLoaderResources;
     }
@@ -98,15 +101,12 @@ public class CachedResource implements WebResource {
             return false;
         }
 
-        long now = System.currentTimeMillis();
-
         if (webResource == null) {
             synchronized (this) {
                 if (webResource == null) {
                     webResource = root.getResourceInternal(webAppPath, useClassLoaderResources);
                     getLastModified();
                     getContentLength();
-                    nextCheck = ttl + now;
                     // exists() is a relatively expensive check for a file so
                     // use the fact that we know if it exists at this point
                     if (webResource instanceof EmptyResource) {
@@ -118,6 +118,8 @@ public class CachedResource implements WebResource {
                 }
             }
         }
+
+        long now = System.currentTimeMillis();
 
         if (now < nextCheck) {
             return true;
@@ -244,13 +246,26 @@ public class CachedResource implements WebResource {
 
     @Override
     public long getContentLength() {
+        /*
+         * Cache the content length for two reasons.
+         *
+         * 1. It is relatively expensive to calculate, it shouldn't change and this method is called multiple times
+         * during cache validation. Caching, therefore, offers a performance benefit.
+         *
+         * 2. There is a race condition if concurrent threads are trying to PUT and DELETE the same resource. See BZ
+         * 69527 (https://bz.apache.org/bugzilla/show_bug.cgi?id=69527#c14) for full details. The short version is that
+         * getContentLength() must always return the same value for any one CachedResource instance else the cache size
+         * will be corrupted.
+         */
         if (cachedContentLength == null) {
-            long result = 0;
-            if (webResource != null) {
-                result = webResource.getContentLength();
-                cachedContentLength = Long.valueOf(result);
+            if (webResource == null) {
+                synchronized (this) {
+                    if (webResource == null) {
+                        webResource = root.getResourceInternal(webAppPath, usesClassLoaderResources);
+                    }
+                }
             }
-            return result;
+            cachedContentLength = Long.valueOf(webResource.getContentLength());
         }
         return cachedContentLength.longValue();
     }
@@ -273,6 +288,20 @@ public class CachedResource implements WebResource {
     @Override
     public String getETag() {
         return webResource.getETag();
+    }
+
+    @Override
+    public String getStrongETag() {
+        if (cachedStrongETag == null) {
+            byte[] buf = getContent();
+            if (buf != null) {
+                buf = ConcurrentMessageDigest.digest("SHA-1", buf);
+                cachedStrongETag = "\"" + HexUtils.toHexString(buf) + "\"";
+            } else {
+                cachedStrongETag = webResource.getStrongETag();
+            }
+        }
+        return cachedStrongETag;
     }
 
     @Override
@@ -340,10 +369,8 @@ public class CachedResource implements WebResource {
             return null;
         }
         try {
-            CachedResourceURLStreamHandler handler = new CachedResourceURLStreamHandler(resourceURL, root, webAppPath,
-                    usesClassLoaderResources);
-            // Need the custom handler for all protocols. URL.of(...) does not allow file to use a custom handler.
-            // Ignore the deprecation for now.
+            CachedResourceURLStreamHandler handler =
+                    new CachedResourceURLStreamHandler(resourceURL, root, webAppPath, usesClassLoaderResources);
             @SuppressWarnings("deprecation")
             URL result = new URL(null, resourceURL.toExternalForm(), handler);
             handler.setCacheURL(result);
@@ -352,6 +379,11 @@ public class CachedResource implements WebResource {
             log.error(sm.getString("cachedResource.invalidURL", resourceURL.toExternalForm()), e);
             return null;
         }
+    }
+
+    @Override
+    public URL getCodeBase() {
+        return webResource.getCodeBase();
     }
 
     @Override
@@ -622,13 +654,5 @@ public class CachedResource implements WebResource {
             return ((JarURLConnection) resourceURL.openConnection()).getJarFile();
         }
 
-        @Override
-        public JarEntry getJarEntry() throws IOException {
-            if (getEntryName() == null) {
-                return null;
-            } else {
-                return super.getJarEntry();
-            }
-        }
     }
 }

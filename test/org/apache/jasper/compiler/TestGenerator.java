@@ -40,7 +40,6 @@ import jakarta.servlet.jsp.tagext.TryCatchFinally;
 import jakarta.servlet.jsp.tagext.VariableInfo;
 
 import org.junit.Assert;
-import org.junit.Ignore;
 import org.junit.Test;
 
 import org.apache.catalina.Context;
@@ -546,6 +545,25 @@ public class TestGenerator extends TomcatBaseTest {
         }
     }
 
+    private static boolean tagTesterTagReleaseReleased = false;
+
+    public static class TesterTagRelease extends TesterTag {
+        private String data;
+
+        public String getData() {
+            return data;
+        }
+
+        public void setData(String data) {
+            this.data = data;
+        }
+
+        @Override
+        public void release() {
+            tagTesterTagReleaseReleased = true;
+        }
+    }
+
     public static class DataPropertyEditor extends PropertyEditorSupport {
     }
 
@@ -786,12 +804,12 @@ public class TestGenerator extends TomcatBaseTest {
         doTestJsp("usebean-04.jsp", HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
     }
 
-    @Ignore // Requires specific Java settings
     @Test
     public void testUseBean05() throws Exception {
         // Whether this test passes or fails depends on the Java version used
         // and the JRE settings.
         // For the test to pass use --illegal-access=deny
+        // This is the default setting for Java 16 onwards
         doTestJsp("usebean-05.jsp", HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
     }
 
@@ -951,6 +969,69 @@ public class TestGenerator extends TomcatBaseTest {
         int rc = getUrl("http://localhost:" + getPort() + "/test/bug6nnnn/bug65390.jsp", body, null);
 
         Assert.assertEquals(body.toString(), HttpServletResponse.SC_OK, rc);
+    }
+
+    @Test
+    public void testBug69508() throws Exception {
+        getTomcatInstanceTestWebapp(false, true);
+
+        ByteChunk body = new ByteChunk();
+        int rc = getUrl("http://localhost:" + getPort() + "/test/bug6nnnn/bug69508.jsp?init=InitCommand", body, null);
+
+        String text = body.toString();
+        Assert.assertEquals(text, HttpServletResponse.SC_OK, rc);
+        // include page URL with param cmd
+        Assert.assertTrue(text, text.contains("<p>cmd - someCommand</p>"));
+        Assert.assertTrue(text, text.contains("<p>param1 - value1</p>"));
+        Assert.assertTrue(text, text.contains("<p>cmd - someCommandAbs</p>"));
+        Assert.assertTrue(text, text.contains("<p>param1 - value1Abs</p>"));
+        // include page URL without param
+        Assert.assertTrue(text, text.contains("<p>param2 - value2</p>"));
+        Assert.assertTrue(text, text.contains("<p>param2 - value2Abs</p>"));
+
+        Assert.assertTrue(text, text.contains("<p>param3 - InitCommand</p>"));
+        Assert.assertTrue(text, text.contains("<p>param3 - InitCommandAbs</p>"));
+
+        Assert.assertTrue(text, text.contains("<p>param4 - value4</p>"));
+        Assert.assertTrue(text, text.contains("<p>param4 - value4Abs</p>"));
+
+        Assert.assertTrue(text, text.contains("<p>param5 - InitCommand</p>"));
+        Assert.assertTrue(text, text.contains("<p>param5 - InitCommandAbs</p>"));
+
+        Assert.assertTrue(text, text.contains("<p>param6 - value6</p>"));
+        Assert.assertTrue(text, text.contains("<p>param6 - value6Abs</p>"));
+    }
+
+    @Test
+    public void testTagReleaseWithPooling() throws Exception {
+        doTestTagRelease(true);
+    }
+
+    @Test
+    public void testTagReleaseWithoutPooling() throws Exception {
+        doTestTagRelease(false);
+    }
+
+    public void doTestTagRelease(boolean enablePooling) throws Exception {
+        tagTesterTagReleaseReleased = false;
+        Tomcat tomcat = getTomcatInstance();
+
+        File appDir = new File("test/webapp");
+        Context ctxt = tomcat.addContext("", appDir.getAbsolutePath());
+        ctxt.addServletContainerInitializer(new JasperInitializer(), null);
+
+        Tomcat.initWebappDefaults(ctxt);
+        Wrapper w = (Wrapper) ctxt.findChild("jsp");
+        w.addInitParameter("enablePooling", String.valueOf(enablePooling));
+
+        tomcat.start();
+
+        getUrl("http://localhost:" + getPort() + "/jsp/generator/release.jsp");
+        if (enablePooling) {
+            Assert.assertFalse(tagTesterTagReleaseReleased);
+        } else {
+            Assert.assertTrue(tagTesterTagReleaseReleased);
+        }
     }
 
     private void doTestJsp(String jspName) throws Exception {
