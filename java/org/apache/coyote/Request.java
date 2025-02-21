@@ -110,12 +110,12 @@ public final class Request {
     private final MessageBytes localAddrMB = MessageBytes.newInstance();
 
     private final MimeHeaders headers = new MimeHeaders();
-    private final Map<String, String> trailerFields = new HashMap<>();
+    private final MimeHeaders trailerFields = new MimeHeaders();
 
     /**
      * Path parameters
      */
-    private final Map<String, String> pathParameters = new HashMap<>();
+    private final Map<String,String> pathParameters = new HashMap<>();
 
     /**
      * Notes.
@@ -153,7 +153,7 @@ public final class Request {
     private final MessageBytes remoteUser = MessageBytes.newInstance();
     private boolean remoteUserNeedsAuthorization = false;
     private final MessageBytes authType = MessageBytes.newInstance();
-    private final HashMap<String, Object> attributes = new HashMap<>();
+    private final HashMap<String,Object> attributes = new HashMap<>();
 
     private Response response;
     private volatile ActionHook hook;
@@ -292,7 +292,12 @@ public final class Request {
     }
 
 
-    public Map<String, String> getTrailerFields() {
+    public Map<String,String> getTrailerFields() {
+        return trailerFields.toMap();
+    }
+
+
+    public MimeHeaders getMimeTrailerFields() {
         return trailerFields;
     }
 
@@ -479,7 +484,7 @@ public final class Request {
         if (contentTypeMB == null || contentTypeMB.isNull()) {
             return null;
         }
-        return contentTypeMB.toString();
+        return contentTypeMB.toStringType();
     }
 
 
@@ -572,7 +577,7 @@ public final class Request {
         attributes.put(name, o);
     }
 
-    public HashMap<String, Object> getAttributes() {
+    public HashMap<String,Object> getAttributes() {
         return attributes;
     }
 
@@ -736,14 +741,16 @@ public final class Request {
         threadId = 0;
     }
 
+    @SuppressWarnings("deprecation")
     public void setRequestThread() {
         Thread t = Thread.currentThread();
-        threadId = t.threadId();
+        threadId = t.getId();
         getRequestProcessor().setWorkerThreadName(t.getName());
     }
 
+    @SuppressWarnings("deprecation")
     public boolean isRequestThread() {
-        return Thread.currentThread().threadId() == threadId;
+        return Thread.currentThread().getId() == threadId;
     }
 
     // -------------------- Per-Request "notes" --------------------
@@ -780,7 +787,13 @@ public final class Request {
         charsetHolder = CharsetHolder.EMPTY;
         expectation = false;
         headers.recycle();
-        trailerFields.clear();
+        trailerFields.recycle();
+        /*
+         * Trailer fields are limited in size by bytes. The following call ensures that any request with a large number
+         * of small trailer fields doesn't result in a long lasting, large array of headers inside the MimeHeader
+         * instance.
+         */
+        trailerFields.setLimit(MimeHeaders.DEFAULT_HEADER_SIZE);
         serverNameMB.recycle();
         serverPort = -1;
         localAddrMB.recycle();
@@ -829,6 +842,15 @@ public final class Request {
 
         startTimeNanos = -1;
         threadId = 0;
+
+        if (hook instanceof NonPipeliningProcessor) {
+            /*
+             * No requirement to maintain state between requests so clear the hook (a.k.a. Processor) and the input
+             * buffer to aid GC.
+             */
+            setHook(null);
+            setInputBuffer(null);
+        }
     }
 
     // -------------------- Info --------------------
@@ -845,7 +867,7 @@ public final class Request {
     }
 
     public boolean isProcessing() {
-        return reqProcessorMX.getStage() == org.apache.coyote.Constants.STAGE_SERVICE;
+        return reqProcessorMX.getStage() == Constants.STAGE_SERVICE;
     }
 
     /**

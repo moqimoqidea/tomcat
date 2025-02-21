@@ -57,8 +57,8 @@ public final class IntrospectionUtils {
     @SuppressWarnings("null") // setPropertyMethodVoid is not null when used
     public static boolean setProperty(Object o, String name, String value,
             boolean invokeSetProperty, StringBuilder actualMethod) {
-        if (log.isDebugEnabled()) {
-            log.debug("IntrospectionUtils: setProperty(" +
+        if (log.isTraceEnabled()) {
+            log.trace("IntrospectionUtils: setProperty(" +
                     o.getClass() + " " + name + "=" + value + ")");
         }
 
@@ -105,7 +105,11 @@ public final class IntrospectionUtils {
                             ok = false;
                         }
                         if (actualMethod != null) {
-                            actualMethod.append(method.getName()).append("(Integer.valueOf(\"").append(value).append("\"))");
+                            if ("java.lang.Integer".equals(paramType.getName())) {
+                                actualMethod.append(method.getName()).append("(Integer.valueOf(\"").append(value).append("\"))");
+                            } else {
+                                actualMethod.append(method.getName()).append("(Integer.parseInt(\"").append(value).append("\"))");
+                            }
                         }
                         // Try a setFoo ( long )
                     } else if ("java.lang.Long".equals(paramType.getName())
@@ -116,14 +120,22 @@ public final class IntrospectionUtils {
                             ok = false;
                         }
                         if (actualMethod != null) {
-                            actualMethod.append(method.getName()).append("(Long.valueOf(\"").append(value).append("\"))");
+                            if ("java.lang.Long".equals(paramType.getName())) {
+                                actualMethod.append(method.getName()).append("(Long.valueOf(\"").append(value).append("\"))");
+                            } else {
+                                actualMethod.append(method.getName()).append("(Long.parseLong(\"").append(value).append("\"))");
+                            }
                         }
                         // Try a setFoo ( boolean )
                     } else if ("java.lang.Boolean".equals(paramType.getName())
                             || "boolean".equals(paramType.getName())) {
                         params[0] = Boolean.valueOf(value);
                         if (actualMethod != null) {
-                            actualMethod.append(method.getName()).append("(Boolean.valueOf(\"").append(value).append("\"))");
+                            if ("java.lang.Boolean".equals(paramType.getName())) {
+                                actualMethod.append(method.getName()).append("(Boolean.valueOf(\"").append(value).append("\"))");
+                            } else {
+                                actualMethod.append(method.getName()).append("(Boolean.parseBoolean(\"").append(value).append("\"))");
+                            }
                         }
                         // Try a setFoo ( InetAddress )
                     } else if ("java.net.InetAddress".equals(paramType
@@ -132,7 +144,7 @@ public final class IntrospectionUtils {
                             params[0] = InetAddress.getByName(value);
                         } catch (UnknownHostException exc) {
                             if (log.isDebugEnabled()) {
-                                log.debug("IntrospectionUtils: Unable to resolve host name:" + value);
+                                log.debug(sm.getString("introspectionUtils.hostResolutionFail", value));
                             }
                             ok = false;
                         }
@@ -141,8 +153,8 @@ public final class IntrospectionUtils {
                         }
                         // Unknown type
                     } else {
-                        if (log.isDebugEnabled()) {
-                            log.debug("IntrospectionUtils: Unknown type " +
+                        if (log.isTraceEnabled()) {
+                            log.trace("IntrospectionUtils: Unknown type " +
                                     paramType.getName());
                         }
                     }
@@ -308,7 +320,7 @@ public final class IntrospectionUtils {
             return value;
         }
         if (iterationCount >=20) {
-            log.warn("System property failed to update and remains [" + value + "]");
+            log.warn(sm.getString("introspectionUtils.tooManyIterations", value));
             return value;
         }
         StringBuilder sb = new StringBuilder();
@@ -362,8 +374,8 @@ public final class IntrospectionUtils {
         if (newval.equals(value)) {
             return value;
         }
-        if (log.isDebugEnabled()) {
-            log.debug("IntrospectionUtils.replaceProperties iter on: " + newval);
+        if (log.isTraceEnabled()) {
+            log.trace("IntrospectionUtils.replaceProperties iter on: " + newval);
         }
         return replaceProperties(newval, staticProp, dynamicProp, classLoader, iterationCount+1);
     }
@@ -416,15 +428,18 @@ public final class IntrospectionUtils {
         return methods;
     }
 
-    @SuppressWarnings("null") // params cannot be null when comparing lengths
     public static Method findMethod(Class<?> c, String name,
             Class<?> params[]) {
         Method methods[] = findMethods(c);
         for (Method method : methods) {
             if (method.getName().equals(name)) {
                 Class<?> methodParams[] = method.getParameterTypes();
-                if (params == null && methodParams.length == 0) {
-                    return method;
+                if (params == null) {
+                    if (methodParams.length == 0) {
+                        return method;
+                    } else {
+                        continue;
+                    }
                 }
                 if (params.length != methodParams.length) {
                     continue;
@@ -449,8 +464,8 @@ public final class IntrospectionUtils {
         if (target == null || methodN == null || param1 == null) {
             throw new IllegalArgumentException(sm.getString("introspectionUtils.nullParameter"));
         }
-        if (log.isDebugEnabled()) {
-            log.debug("IntrospectionUtils: callMethod1 " +
+        if (log.isTraceEnabled()) {
+            log.trace("IntrospectionUtils: callMethod1 " +
                     target.getClass().getName() + " " +
                     param1.getClass().getName() + " " + typeParam1);
         }
@@ -463,8 +478,7 @@ public final class IntrospectionUtils {
         }
         Method m = findMethod(target.getClass(), methodN, params);
         if (m == null) {
-            throw new NoSuchMethodException(target.getClass().getName() + " "
-                    + methodN);
+            throw new NoSuchMethodException(sm.getString("introspectionUtils.noMethod", methodN, target, target.getClass()));
         }
         try {
             return m.invoke(target, new Object[] { param1 });
@@ -480,16 +494,14 @@ public final class IntrospectionUtils {
         m = findMethod(target.getClass(), methodN, typeParams);
         if (m == null) {
             if (log.isDebugEnabled()) {
-                log.debug("IntrospectionUtils: Can't find method " + methodN +
-                        " in " + target + " CLASS " + target.getClass());
+                log.debug(sm.getString("introspectionUtils.noMethod", methodN, target, target.getClass()));
             }
             return null;
         }
         try {
             Object o = m.invoke(target, params);
 
-            if (log.isDebugEnabled()) {
-                // debug
+            if (log.isTraceEnabled()) {
                 StringBuilder sb = new StringBuilder();
                 sb.append(target.getClass().getName()).append('.').append(methodN).append('(');
                 for (int i = 0; i < params.length; i++) {
@@ -499,7 +511,7 @@ public final class IntrospectionUtils {
                     sb.append(params[i]);
                 }
                 sb.append(')');
-                log.debug("IntrospectionUtils:" + sb.toString());
+                log.trace("IntrospectionUtils:" + sb.toString());
             }
             return o;
         } catch (InvocationTargetException ie) {
@@ -530,15 +542,14 @@ public final class IntrospectionUtils {
                 result = InetAddress.getByName(object);
             } catch (UnknownHostException exc) {
                 if (log.isDebugEnabled()) {
-                    log.debug("IntrospectionUtils: Unable to resolve host name:" +
-                            object);
+                    log.debug(sm.getString("introspectionUtils.hostResolutionFail", object));
                 }
             }
 
             // Unknown type
         } else {
-            if (log.isDebugEnabled()) {
-                log.debug("IntrospectionUtils: Unknown type " +
+            if (log.isTraceEnabled()) {
+                log.trace("IntrospectionUtils: Unknown type " +
                         paramType.getName());
             }
         }

@@ -17,6 +17,7 @@
 package org.apache.catalina.core;
 
 import java.io.IOException;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,6 +40,9 @@ import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.descriptor.web.ErrorPage;
 
 public class TestStandardHostValve extends TomcatBaseTest {
+
+    private static final String FAIL_NO_MESSAGE = "FAIL - NO MESSAGE";
+    private static final String EMPTY_NO_MESSAGE = "EMPTY - NO MESSAGE";
 
     @Test
     public void testErrorPageHandling400() throws Exception {
@@ -64,6 +68,12 @@ public class TestStandardHostValve extends TomcatBaseTest {
     }
 
 
+    @Test
+    public void testErrorPageHandlingException() throws Exception {
+        doTestErrorPageHandling(0, IOException.class.getCanonicalName(), "/IOE");
+    }
+
+
     private void doTestErrorPageHandling(int error, String exception, String report)
             throws Exception {
 
@@ -71,7 +81,7 @@ public class TestStandardHostValve extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         // Add the error page
         Tomcat.addServlet(ctx, "error", new ErrorServlet());
@@ -93,6 +103,12 @@ public class TestStandardHostValve extends TomcatBaseTest {
         errorPage500.setLocation("/report/500");
         ctx.addErrorPage(errorPage500);
 
+        // And the handling for IOEs
+        ErrorPage errorPageIOE = new ErrorPage();
+        errorPageIOE.setExceptionType(IOException.class.getCanonicalName());
+        errorPageIOE.setLocation("/report/IOE");
+        ctx.addErrorPage(errorPageIOE);
+
         // And the default error handling
         ErrorPage errorPageDefault = new ErrorPage();
         errorPageDefault.setLocation("/report/default");
@@ -105,18 +121,25 @@ public class TestStandardHostValve extends TomcatBaseTest {
         int rc = getUrl("http://localhost:" + getPort() + "/error?errorCode=" + error + "&exception=" + exception,
                 bc, null);
 
-        Assert.assertEquals(error, rc);
-        Assert.assertEquals(report, bc.toString());
+        if (error > 399) {
+            // Specific status code expected
+            Assert.assertEquals(error, rc);
+        } else {
+            // Default error status code expected
+            Assert.assertEquals(500, rc);
+        }
+        String[] responseLines = (bc.toString().split(System.lineSeparator()));
+        // First line should be the path
+        Assert.assertEquals(report, responseLines[0]);
+        // Second line should not be the null message warning
+        Assert.assertNotEquals(FAIL_NO_MESSAGE, responseLines[1]);
     }
 
 
     @Test(expected=IllegalArgumentException.class)
     public void testInvalidErrorPage() throws Exception {
-        // Set up a container
-        Tomcat tomcat = getTomcatInstance();
-
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         // Add a broken error page configuration
         ErrorPage errorPage500 = new ErrorPage();
@@ -132,7 +155,7 @@ public class TestStandardHostValve extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         // Add the error page
         Tomcat.addServlet(ctx, "error", new ErrorServlet());
@@ -174,7 +197,7 @@ public class TestStandardHostValve extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         // Add the error page
         Tomcat.addServlet(ctx, "error", new ExceptionServlet());
@@ -218,7 +241,9 @@ public class TestStandardHostValve extends TomcatBaseTest {
         protected void doGet(HttpServletRequest req, HttpServletResponse resp)
                 throws ServletException, IOException {
             int error = Integer.parseInt(req.getParameter("errorCode"));
-            resp.sendError(error);
+            if (error > 399) {
+                resp.sendError(error);
+            }
 
             Throwable t = null;
             String exception = req.getParameter("exception");
@@ -229,7 +254,15 @@ public class TestStandardHostValve extends TomcatBaseTest {
                     // Should never happen but in case it does...
                     t = new IllegalArgumentException();
                 }
-                req.setAttribute(RequestDispatcher.ERROR_EXCEPTION, t);
+                if (error < 400) {
+                    if (t instanceof RuntimeException) {
+                        throw (RuntimeException) t;
+                    } else if (t instanceof IOException) {
+                        throw (IOException) t;
+                    } else if (t instanceof ServletException) {
+                        throw (ServletException) t;
+                    }
+                }
             }
         }
     }
@@ -257,7 +290,16 @@ public class TestStandardHostValve extends TomcatBaseTest {
                 throws ServletException, IOException {
             String pathInfo = req.getPathInfo();
             resp.setContentType("text/plain");
-            resp.getWriter().print(pathInfo);
+            PrintWriter pw = resp.getWriter();
+            pw.println(pathInfo);
+
+            String message = (String) req.getAttribute(RequestDispatcher.ERROR_MESSAGE);
+            if (message == null) {
+                message = FAIL_NO_MESSAGE;
+            } else if (message.length() == 0) {
+                message = EMPTY_NO_MESSAGE;
+            }
+            pw.println(message);
         }
     }
 }

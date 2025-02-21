@@ -63,7 +63,7 @@ public class DeltaRequest implements Externalizable {
     public static final String NAME_LISTENER = "__SET__LISTENER__";
 
     private String sessionId;
-    private Deque<AttributeInfo> actions = new ArrayDeque<>();
+    private final Deque<AttributeInfo> actions = new ArrayDeque<>();
     private final Deque<AttributeInfo> actionPool = new ArrayDeque<>();
 
     private boolean recordAllActions = false;
@@ -171,7 +171,7 @@ public class DeltaRequest implements Externalizable {
 
     public void execute(DeltaSession session, boolean notifyListeners) {
         if (!this.sessionId.equals(session.getId())) {
-            throw new java.lang.IllegalArgumentException(sm.getString("deltaRequest.ssid.mismatch"));
+            throw new IllegalArgumentException(sm.getString("deltaRequest.ssid.mismatch"));
         }
         session.access();
         for (AttributeInfo info : actions) {
@@ -266,7 +266,8 @@ public class DeltaRequest implements Externalizable {
     public void setSessionId(String sessionId) {
         this.sessionId = sessionId;
         if (sessionId == null) {
-            new Exception(sm.getString("deltaRequest.ssid.null")).fillInStackTrace().printStackTrace();
+            Exception e = new Exception(sm.getString("deltaRequest.ssid.null"));
+            log.error(sm.getString("deltaRequest.ssid.null"), e.fillInStackTrace());
         }
     }
 
@@ -289,11 +290,6 @@ public class DeltaRequest implements Externalizable {
         sessionId = in.readUTF();
         recordAllActions = in.readBoolean();
         int cnt = in.readInt();
-        if (actions == null) {
-            actions = new ArrayDeque<>();
-        } else {
-            actions.clear();
-        }
         for (int i = 0; i < cnt; i++) {
             AttributeInfo info = null;
             if (this.actionPool.size() > 0) {
@@ -313,7 +309,7 @@ public class DeltaRequest implements Externalizable {
 
 
     @Override
-    public void writeExternal(java.io.ObjectOutput out) throws java.io.IOException {
+    public void writeExternal(java.io.ObjectOutput out) throws IOException {
         // sessionId - String
         // recordAll - boolean
         // size - int
@@ -344,7 +340,7 @@ public class DeltaRequest implements Externalizable {
         return bos.toByteArray();
     }
 
-    private static class AttributeInfo implements java.io.Externalizable {
+    private static class AttributeInfo implements Externalizable {
         private String name = null;
         private Object value = null;
         private int action;

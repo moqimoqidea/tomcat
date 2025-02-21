@@ -50,21 +50,35 @@ abstract class AbstractStream {
     }
 
 
+    /**
+     * @return the stream identifier
+     */
     final Integer getIdentifier() {
         return identifier;
     }
 
 
+    /**
+     * @return the stream identifier as a String
+     */
     final String getIdAsString() {
         return idAsString;
     }
 
 
+    /**
+     * @return the stream identifier
+     */
     final int getIdAsInt() {
         return identifier.intValue();
     }
 
 
+    /**
+     * Set the window size for this stream.
+     *
+     * @param windowSize the value
+     */
     final void setWindowSize(long windowSize) {
         windowAllocationLock.lock();
         try {
@@ -75,6 +89,9 @@ abstract class AbstractStream {
     }
 
 
+    /**
+     * @return the window size
+     */
     final long getWindowSize() {
         windowAllocationLock.lock();
         try {
@@ -100,8 +117,8 @@ abstract class AbstractStream {
             // goes beyond 2^31-1 an error is triggered.
             windowSize += increment;
 
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("abstractStream.windowSizeInc", getConnectionId(), getIdAsString(),
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("abstractStream.windowSizeInc", getConnectionId(), getIdAsString(),
                         Integer.toString(increment), Long.toString(windowSize)));
             }
 
@@ -120,6 +137,11 @@ abstract class AbstractStream {
     }
 
 
+    /**
+     * Decrement window size.
+     *
+     * @param decrement The amount by which the window size should be decreased
+     */
     final void decrementWindowSize(int decrement) {
         windowAllocationLock.lock();
         try {
@@ -127,8 +149,8 @@ abstract class AbstractStream {
             // the Integer.MAX_VALUE and once windowSize goes negative no further
             // decrements are permitted
             windowSize -= decrement;
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("abstractStream.windowSizeDec", getConnectionId(), getIdAsString(),
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("abstractStream.windowSizeDec", getConnectionId(), getIdAsString(),
                         Integer.toString(decrement), Long.toString(windowSize)));
             }
         } finally {
@@ -137,29 +159,48 @@ abstract class AbstractStream {
     }
 
 
+    /**
+     * @return the requested amount of resources requested
+     */
     final int getConnectionAllocationRequested() {
         return connectionAllocationRequested;
     }
 
 
+    /**
+     * Set the amount of requested resources.
+     *
+     * @param connectionAllocationRequested the value
+     */
     final void setConnectionAllocationRequested(int connectionAllocationRequested) {
-        log.debug(sm.getString("abstractStream.setConnectionAllocationRequested", getConnectionId(), getIdAsString(),
+        log.trace(sm.getString("abstractStream.setConnectionAllocationRequested", getConnectionId(), getIdAsString(),
                 Integer.toString(this.connectionAllocationRequested), Integer.toString(connectionAllocationRequested)));
         this.connectionAllocationRequested = connectionAllocationRequested;
     }
 
 
+    /**
+     * @return the allocation that was made at the connection level
+     */
     final int getConnectionAllocationMade() {
         return connectionAllocationMade;
     }
 
 
+    /**
+     * Set the allocation made at the connection level.
+     *
+     * @param connectionAllocationMade the value
+     */
     final void setConnectionAllocationMade(int connectionAllocationMade) {
-        log.debug(sm.getString("abstractStream.setConnectionAllocationMade", getConnectionId(), getIdAsString(),
+        log.trace(sm.getString("abstractStream.setConnectionAllocationMade", getConnectionId(), getIdAsString(),
                 Integer.toString(this.connectionAllocationMade), Integer.toString(connectionAllocationMade)));
         this.connectionAllocationMade = connectionAllocationMade;
     }
 
 
+    /**
+     * @return the connection id
+     */
     abstract String getConnectionId();
 }

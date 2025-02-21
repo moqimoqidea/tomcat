@@ -45,8 +45,7 @@ public class CrawlerSessionManagerValve extends ValveBase {
 
     private static final Log log = LogFactory.getLog(CrawlerSessionManagerValve.class);
 
-    private final Map<String, String> clientIdSessionId = new ConcurrentHashMap<>();
-    private final Map<String, String> sessionIdClientId = new ConcurrentHashMap<>();
+    private final Map<String,String> clientIdSessionId = new ConcurrentHashMap<>();
 
     private String crawlerUserAgents = ".*[bB]ot.*|.*Yahoo! Slurp.*|.*Feedfetcher-Google.*";
     private Pattern uaPattern = null;
@@ -139,7 +138,7 @@ public class CrawlerSessionManagerValve extends ValveBase {
     }
 
 
-    public Map<String, String> getClientIpSessionId() {
+    public Map<String,String> getClientIpSessionId() {
         return clientIdSessionId;
     }
 
@@ -175,13 +174,20 @@ public class CrawlerSessionManagerValve extends ValveBase {
     @Override
     public void invoke(Request request, Response response) throws IOException, ServletException {
 
+        Host host = request.getHost();
+        if (host == null) {
+            // Request will have no session
+            getNext().invoke(request, response);
+            return;
+        }
+
         boolean isBot = false;
         String sessionId = null;
         String clientIp = request.getRemoteAddr();
-        String clientIdentifier = getClientIdentifier(request.getHost(), request.getContext(), clientIp);
+        String clientIdentifier = getClientIdentifier(host, request.getContext(), clientIp);
 
-        if (log.isDebugEnabled()) {
-            log.debug(request.hashCode() + ": ClientIdentifier=" + clientIdentifier + ", RequestedSessionId=" +
+        if (log.isTraceEnabled()) {
+            log.trace(request.hashCode() + ": ClientIdentifier=" + clientIdentifier + ", RequestedSessionId=" +
                     request.getRequestedSessionId());
         }
 
@@ -198,15 +204,15 @@ public class CrawlerSessionManagerValve extends ValveBase {
             // If more than one UA header - assume not a bot
             if (uaHeader != null && !uaHeaders.hasMoreElements()) {
 
-                if (log.isDebugEnabled()) {
-                    log.debug(request.hashCode() + ": UserAgent=" + uaHeader);
+                if (log.isTraceEnabled()) {
+                    log.trace(request.hashCode() + ": UserAgent=" + uaHeader);
                 }
 
                 if (uaPattern.matcher(uaHeader).matches()) {
                     isBot = true;
 
-                    if (log.isDebugEnabled()) {
-                        log.debug(request.hashCode() + ": Bot found. UserAgent=" + uaHeader);
+                    if (log.isTraceEnabled()) {
+                        log.trace(request.hashCode() + ": Bot found. UserAgent=" + uaHeader);
                     }
                 }
             }
@@ -214,8 +220,8 @@ public class CrawlerSessionManagerValve extends ValveBase {
             if (ipPattern != null && ipPattern.matcher(clientIp).matches()) {
                 isBot = true;
 
-                if (log.isDebugEnabled()) {
-                    log.debug(request.hashCode() + ": Bot found. IP=" + clientIp);
+                if (log.isTraceEnabled()) {
+                    log.trace(request.hashCode() + ": Bot found. IP=" + clientIp);
                 }
             }
 
@@ -224,8 +230,8 @@ public class CrawlerSessionManagerValve extends ValveBase {
                 sessionId = clientIdSessionId.get(clientIdentifier);
                 if (sessionId != null) {
                     request.setRequestedSessionId(sessionId);
-                    if (log.isDebugEnabled()) {
-                        log.debug(request.hashCode() + ": SessionID=" + sessionId);
+                    if (log.isTraceEnabled()) {
+                        log.trace(request.hashCode() + ": SessionID=" + sessionId);
                     }
                 }
             }
@@ -239,19 +245,18 @@ public class CrawlerSessionManagerValve extends ValveBase {
                 HttpSession s = request.getSession(false);
                 if (s != null) {
                     clientIdSessionId.put(clientIdentifier, s.getId());
-                    sessionIdClientId.put(s.getId(), clientIdentifier);
                     // #valueUnbound() will be called on session expiration
                     s.setAttribute(this.getClass().getName(),
                             new CrawlerHttpSessionBindingListener(clientIdSessionId, clientIdentifier));
                     s.setMaxInactiveInterval(sessionInactiveInterval);
 
-                    if (log.isDebugEnabled()) {
-                        log.debug(request.hashCode() + ": New bot session. SessionID=" + s.getId());
+                    if (log.isTraceEnabled()) {
+                        log.trace(request.hashCode() + ": New bot session. SessionID=" + s.getId());
                     }
                 }
             } else {
-                if (log.isDebugEnabled()) {
-                    log.debug(request.hashCode() + ": Bot session accessed. SessionID=" + sessionId);
+                if (log.isTraceEnabled()) {
+                    log.trace(request.hashCode() + ": Bot session accessed. SessionID=" + sessionId);
                 }
             }
         }
@@ -272,10 +277,10 @@ public class CrawlerSessionManagerValve extends ValveBase {
     private static class CrawlerHttpSessionBindingListener implements HttpSessionBindingListener, Serializable {
         private static final long serialVersionUID = 1L;
 
-        private final transient Map<String, String> clientIdSessionId;
+        private final transient Map<String,String> clientIdSessionId;
         private final transient String clientIdentifier;
 
-        private CrawlerHttpSessionBindingListener(Map<String, String> clientIdSessionId, String clientIdentifier) {
+        private CrawlerHttpSessionBindingListener(Map<String,String> clientIdSessionId, String clientIdentifier) {
             this.clientIdSessionId = clientIdSessionId;
             this.clientIdentifier = clientIdentifier;
         }

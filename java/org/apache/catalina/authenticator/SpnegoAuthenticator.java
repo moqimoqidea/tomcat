@@ -19,6 +19,7 @@ package org.apache.catalina.authenticator;
 import java.io.File;
 import java.io.IOException;
 import java.security.Principal;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.concurrent.CompletionException;
 import java.util.regex.Pattern;
@@ -35,7 +36,6 @@ import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.buf.MessageBytes;
-import org.apache.tomcat.util.codec.binary.Base64;
 import org.apache.tomcat.util.compat.JreVendor;
 import org.ietf.jgss.GSSContext;
 import org.ietf.jgss.GSSCredential;
@@ -161,10 +161,12 @@ public class SpnegoAuthenticator extends AuthenticatorBase {
             return false;
         }
 
-        authorizationBC.setOffset(authorizationBC.getOffset() + 10);
+        authorizationBC.setStart(authorizationBC.getStart() + 10);
 
-        byte[] decoded = Base64.decodeBase64(authorizationBC.getBuffer(), authorizationBC.getOffset(),
+        byte[] encoded = new byte[authorizationBC.getLength()];
+        System.arraycopy(authorizationBC.getBuffer(), authorizationBC.getStart(), encoded, 0,
                 authorizationBC.getLength());
+        byte[] decoded = Base64.getDecoder().decode(encoded);
 
         if (getApplyJava8u40Fix()) {
             SpnegoTokenFixer.fix(decoded);
@@ -205,7 +207,6 @@ public class SpnegoAuthenticator extends AuthenticatorBase {
             } else {
                 credentialLifetime = GSSCredential.DEFAULT_LIFETIME;
             }
-
             gssContext = manager.createContext(Subject.callAs(subject, () -> {
                 return manager.createCredential(null, credentialLifetime, new Oid("1.3.6.1.5.5.2"),
                         GSSCredential.ACCEPT_ONLY);
@@ -229,7 +230,6 @@ public class SpnegoAuthenticator extends AuthenticatorBase {
             principal = Subject.callAs(subject, () -> {
                 return context.getRealm().authenticate(gssContextFinal, storeDelegatedCredential);
             });
-
         } catch (GSSException e) {
             if (log.isDebugEnabled()) {
                 log.debug(sm.getString("spnegoAuthenticator.ticketValidateFail"), e);
@@ -267,7 +267,8 @@ public class SpnegoAuthenticator extends AuthenticatorBase {
         }
 
         // Send response token on success and failure
-        response.setHeader(AUTH_HEADER_NAME, AUTH_HEADER_VALUE_NEGOTIATE + " " + Base64.encodeBase64String(outToken));
+        response.setHeader(AUTH_HEADER_NAME,
+                AUTH_HEADER_VALUE_NEGOTIATE + " " + Base64.getEncoder().encodeToString(outToken));
 
         if (principal != null) {
             register(request, response, principal, Constants.SPNEGO_METHOD, principal.getName(), null);

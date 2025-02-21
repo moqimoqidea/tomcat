@@ -75,16 +75,16 @@ public class AntCompiler extends Compiler {
         logger.setOutputPrintStream(System.out);
         logger.setErrorPrintStream(System.err);
         logger.setMessageOutputLevel(Project.MSG_INFO);
-        project.addBuildListener( logger);
+        project.addBuildListener(logger);
         if (System.getProperty(Constants.CATALINA_HOME_PROP) != null) {
             project.setBasedir(System.getProperty(Constants.CATALINA_HOME_PROP));
         }
 
-        if( options.getCompiler() != null ) {
-            if( log.isDebugEnabled() ) {
-                log.debug("Compiler " + options.getCompiler() );
+        if (options.getCompiler() != null) {
+            if (log.isTraceEnabled()) {
+                log.trace("Compiler " + options.getCompiler());
             }
-            project.setProperty("build.compiler", options.getCompiler() );
+            project.setProperty("build.compiler", options.getCompiler());
         }
         project.init();
         return project;
@@ -95,9 +95,7 @@ public class AntCompiler extends Compiler {
         protected final StringBuilder reportBuf = new StringBuilder();
 
         @Override
-        protected void printMessage(final String message,
-                final PrintStream stream,
-                final int priority) {
+        protected void printMessage(final String message, final PrintStream stream, final int priority) {
         }
 
         @Override
@@ -116,12 +114,9 @@ public class AntCompiler extends Compiler {
     // --------------------------------------------------------- Public Methods
 
 
-    /**
-     * Compile the servlet from .java file to .class file
-     */
     @Override
     protected void generateClass(Map<String,SmapStratum> smaps)
-        throws FileNotFoundException, JasperException, Exception {
+            throws FileNotFoundException, JasperException, Exception {
 
         long t1 = 0;
         if (log.isDebugEnabled()) {
@@ -134,9 +129,9 @@ public class AntCompiler extends Compiler {
 
         StringBuilder errorReport = new StringBuilder();
 
-        StringBuilder info=new StringBuilder();
-        info.append("Compile: javaFileName=" + javaFileName + "\n" );
-        info.append("    classpath=" + classpath + "\n" );
+        StringBuilder info = new StringBuilder();
+        info.append("Compile: javaFileName=" + javaFileName + "\n");
+        info.append("    classpath=" + classpath + "\n");
 
         // Start capturing the System.err output for this thread
         SystemLogHandler.setThread();
@@ -157,9 +152,8 @@ public class AntCompiler extends Compiler {
             info.append("    cp=" + repository + "\n");
         }
 
-        if (log.isDebugEnabled()) {
-            log.debug( "Using classpath: " + System.getProperty("java.class.path") +
-                    File.pathSeparator + classpath);
+        if (log.isTraceEnabled()) {
+            log.trace("Using classpath: " + System.getProperty("java.class.path") + File.pathSeparator + classpath);
         }
 
         // Initializing sourcepath
@@ -184,7 +178,7 @@ public class AntCompiler extends Compiler {
         javac.setSrcdir(srcPath);
         javac.setTempdir(options.getScratchDir());
         javac.setFork(ctxt.getOptions().getFork());
-        info.append("    srcDir=" + srcPath + "\n" );
+        info.append("    srcDir=" + srcPath + "\n");
 
         // Set the Java compiler to use
         if (options.getCompiler() != null) {
@@ -206,7 +200,7 @@ public class AntCompiler extends Compiler {
         PatternSet.NameEntry includes = javac.createInclude();
 
         includes.setName(ctxt.getJavaPath());
-        info.append("    include="+ ctxt.getJavaPath() + "\n" );
+        info.append("    include=" + ctxt.getJavaPath() + "\n");
 
         BuildException be = null;
 
@@ -214,7 +208,7 @@ public class AntCompiler extends Compiler {
             if (ctxt.getOptions().getFork()) {
                 javac.execute();
             } else {
-                synchronized(javacLock) {
+                synchronized (javacLock) {
                     javac.execute();
                 }
             }
@@ -236,16 +230,15 @@ public class AntCompiler extends Compiler {
         if (!ctxt.keepGenerated()) {
             File javaFile = new File(javaFileName);
             if (!javaFile.delete()) {
-                throw new JasperException(Localizer.getMessage(
-                        "jsp.warning.compiler.javafile.delete.fail", javaFile));
+                throw new JasperException(Localizer.getMessage("jsp.warning.compiler.javafile.delete.fail", javaFile));
             }
         }
 
         if (be != null) {
             String errorReportString = errorReport.toString();
             log.error(Localizer.getMessage("jsp.error.compilation", javaFileName, errorReportString));
-            JavacErrorDetail[] javacErrors = ErrorDispatcher.parseJavacErrors(
-                    errorReportString, javaFileName, pageNodes);
+            JavacErrorDetail[] javacErrors =
+                    ErrorDispatcher.parseJavacErrors(errorReportString, javaFileName, pageNodes);
             if (javacErrors != null) {
                 errDispatcher.javacError(javacErrors);
             } else {
@@ -253,10 +246,9 @@ public class AntCompiler extends Compiler {
             }
         }
 
-        if( log.isDebugEnabled() ) {
+        if (log.isDebugEnabled()) {
             long t2 = System.currentTimeMillis();
-            log.debug("Compiled " + ctxt.getServletJavaFileName() + " "
-                      + (t2-t1) + "ms");
+            log.debug(Localizer.getMessage("jsp.compiled", ctxt.getServletJavaFileName(), Long.valueOf(t2 - t1)));
         }
 
         logger = null;
@@ -281,6 +273,7 @@ public class AntCompiler extends Compiler {
 
         /**
          * Construct the handler to capture the output of the given steam.
+         *
          * @param wrapped The wrapped stream
          */
         public SystemLogHandler(PrintStream wrapped) {
@@ -301,15 +294,13 @@ public class AntCompiler extends Compiler {
         /**
          * Thread &lt;-&gt; PrintStream associations.
          */
-        protected static final ThreadLocal<PrintStream> streams =
-                new ThreadLocal<>();
+        protected static final ThreadLocal<PrintStream> streams = new ThreadLocal<>();
 
 
         /**
          * Thread &lt;-&gt; ByteArrayOutputStream associations.
          */
-        protected static final ThreadLocal<ByteArrayOutputStream> data =
-                new ThreadLocal<>();
+        protected static final ThreadLocal<ByteArrayOutputStream> data = new ThreadLocal<>();
 
 
         // --------------------------------------------------------- Public Methods
@@ -326,6 +317,7 @@ public class AntCompiler extends Compiler {
 
         /**
          * Stop capturing thread's output and return captured data as a String.
+         *
          * @return the captured output
          */
         public static String unsetThread() {
@@ -344,6 +336,7 @@ public class AntCompiler extends Compiler {
 
         /**
          * Find PrintStream to which the output must be written to.
+         *
          * @return the current stream
          */
         protected PrintStream findStream() {
@@ -375,7 +368,7 @@ public class AntCompiler extends Compiler {
 
         @Override
         protected void setError() {
-            //findStream().setError();
+            // findStream().setError();
         }
 
         @Override
@@ -384,8 +377,7 @@ public class AntCompiler extends Compiler {
         }
 
         @Override
-        public void write(byte[] b)
-            throws IOException {
+        public void write(byte[] b) throws IOException {
             findStream().write(b);
         }
 

@@ -26,6 +26,9 @@ import java.nio.charset.CoderResult;
 import java.nio.charset.CodingErrorAction;
 import java.util.Locale;
 
+import org.apache.juli.logging.Log;
+import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.res.StringManager;
 
 /**
@@ -33,6 +36,7 @@ import org.apache.tomcat.util.res.StringManager;
  */
 public class B2CConverter {
 
+    private static final Log log = LogFactory.getLog(B2CConverter.class);
     private static final StringManager sm = StringManager.getManager(B2CConverter.class);
 
     private static final CharsetCache charsetCache = new CharsetCache();
@@ -96,7 +100,12 @@ public class B2CConverter {
      * Reset the decoder state.
      */
     public void recycle() {
-        decoder.reset();
+        try {
+            decoder.reset();
+        } catch (Throwable t) {
+            ExceptionUtils.handleThrowable(t);
+            log.warn(sm.getString("b2cConverter.decoderResetFail", decoder.charset()), t);
+        }
         leftovers.position(0);
     }
 
@@ -152,11 +161,11 @@ public class B2CConverter {
         } else if (result.isOverflow()) {
             // Propagate current positions to the byte chunk and char chunk, if
             // this continues the char buffer will get resized
-            bc.setOffset(bb.position());
+            bc.setStart(bb.position());
             cc.setEnd(cb.position());
         } else if (result.isUnderflow()) {
             // Propagate current positions to the byte chunk and char chunk
-            bc.setOffset(bb.position());
+            bc.setStart(bb.position());
             cc.setEnd(cb.position());
             // Put leftovers in the leftovers byte buffer
             if (bc.getLength() > 0) {

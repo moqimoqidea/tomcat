@@ -18,6 +18,7 @@ package org.apache.catalina.connector;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.net.SocketTimeoutException;
 import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
@@ -26,9 +27,11 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 import jakarta.servlet.ReadListener;
+import jakarta.servlet.RequestDispatcher;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.apache.coyote.ActionCode;
-import org.apache.coyote.Request;
+import org.apache.coyote.BadRequestException;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
 import org.apache.tomcat.util.buf.B2CConverter;
@@ -53,6 +56,8 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
 
     private static final Log log = LogFactory.getLog(InputBuffer.class);
 
+    private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
+
     public static final int DEFAULT_BUFFER_SIZE = 8 * 1024;
 
     // The buffer can be used for byte[] and char[] reading
@@ -69,8 +74,11 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
 
     // ----------------------------------------------------- Instance Variables
 
-    /**
-     * The byte buffer.
+    /*
+     * The byte buffer. Data is always injected into this class by calling {@link #setByteBuffer(ByteBuffer)} rather
+     * than copying data into any existing buffer. It is initialised to an empty buffer as there are code paths that
+     * access the buffer when it is expected to be empty and an empty buffer gives cleaner code than lots of null
+     * checks.
      */
     private ByteBuffer bb;
 
@@ -102,7 +110,7 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
     /**
      * Associated Coyote request.
      */
-    private final Request coyoteRequest;
+    private final org.apache.coyote.Request coyoteRequest;
 
 
     /**
@@ -144,8 +152,8 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
      */
     public InputBuffer(int size, org.apache.coyote.Request coyoteRequest) {
         this.size = size;
-        bb = ByteBuffer.allocate(size);
-        clear(bb);
+        // Will be replaced when there is data to read so initialise to empty buffer.
+        bb = EMPTY_BUFFER;
         cb = CharBuffer.allocate(size);
         clear(cb);
         readLimit = size;
@@ -172,7 +180,11 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
         }
         readLimit = size;
         markPos = -1;
-        clear(bb);
+        /*
+         * This buffer will have been replaced if there was data to read so re-initialise to an empty buffer to clear
+         * any reference to an injected buffer.
+         */
+        bb = EMPTY_BUFFER;
         closed = false;
 
         if (conv != null) {
@@ -183,11 +195,6 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
     }
 
 
-    /**
-     * Close the input buffer.
-     *
-     * @throws IOException An underlying IOException occurred
-     */
     @Override
     public void close() throws IOException {
         closed = true;
@@ -240,7 +247,7 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
             if (log.isDebugEnabled()) {
                 log.debug(sm.getString("inputBuffer.requiresNonBlocking"));
             }
-            return false;
+            return true;
         }
         if (isFinished()) {
             // If this is a non-container thread, need to trigger a read
@@ -275,11 +282,6 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
 
     // ------------------------------------------------- Bytes Handling Methods
 
-    /**
-     * Reads new bytes in the byte chunk.
-     *
-     * @throws IOException An underlying IOException occurred
-     */
     @Override
     public int realReadBytes() throws IOException {
         if (closed) {
@@ -292,11 +294,42 @@ public class InputBuffer extends Reader implements ByteChunk.ByteInputChannel, A
 
         try {
             return coyoteRequest.doRead(this);
+        } catch (BadRequestException bre) {
+            // Make the exception visible to the application
+            handleReadException(bre);
+            throw bre;
         } catch (IOException ioe) {
-            coyoteRequest.setErrorException(ioe);
-            // An IOException on a read is almost always due to
-            // the remote client aborting the request.
+            handleReadException(ioe);
+            // Any other IOException on a read is almost always due to the remote client aborting the request.
+            // Make the exception visible to the application
             throw new ClientAbortException(ioe);
+        }
+    }
+
+
+    private void handleReadException(Exception e) throws IOException {
+        // Set flag used by asynchronous processing to detect errors on non-container threads
+        coyoteRequest.setErrorException(e);
+        // In synchronous processing, this exception may be swallowed by the application so set error flags here.
+        Request request = (Request) coyoteRequest.getNote(CoyoteAdapter.ADAPTER_NOTES);
+        Response response = request.getResponse();
+        request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, e);
+        if (e instanceof SocketTimeoutException) {
+            try {
+                response.sendError(HttpServletResponse.SC_REQUEST_TIMEOUT);
+            } catch (IllegalStateException ex) {
+                // Response already committed
+                response.setStatus(HttpServletResponse.SC_REQUEST_TIMEOUT);
+                response.setError();
+            }
+        } else {
+            try {
+                response.sendError(HttpServletResponse.SC_BAD_REQUEST);
+            } catch (IllegalStateException ex) {
+                // Response already committed
+                response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                response.setError();
+            }
         }
     }
 

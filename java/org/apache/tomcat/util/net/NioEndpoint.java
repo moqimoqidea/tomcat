@@ -65,17 +65,9 @@ import org.apache.tomcat.util.net.Acceptor.AcceptorState;
 import org.apache.tomcat.util.net.jsse.JSSESupport;
 
 /**
- * NIO tailored thread pool, providing the following services:
- * <ul>
- * <li>Socket acceptor thread</li>
- * <li>Socket poller thread</li>
- * <li>Worker threads pool</li>
- * </ul>
- *
- * TODO: Consider using the virtual machine's thread pool.
+ * NIO endpoint.
  *
  * @author Mladen Turk
- * @author Remy Maucherat
  */
 public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,SocketChannel> {
 
@@ -232,7 +224,7 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                     FileAttribute<Set<PosixFilePermission>> attrs = PosixFilePermissions.asFileAttribute(permissions);
                     Files.setAttribute(path, attrs.name(), attrs.value());
                 } else {
-                    java.io.File file = path.toFile();
+                    File file = path.toFile();
                     if (permissions.contains(PosixFilePermission.OTHERS_READ) && !file.setReadable(true, false)) {
                         log.warn(sm.getString("endpoint.nio.perms.readFail", file.getPath()));
                     }
@@ -305,7 +297,12 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
         }
         if (running) {
             running = false;
-            acceptor.stop(10);
+            /*
+             * Need to wait for the acceptor to unlock but not too long. 100ms plus twice the unlock timeout should be
+             * plenty of time for the acceptor to unlock without being an excessively long wait if the unlock fails.
+             */
+            int acceptorWaitMilliSeconds = 100 + 2 * getSocketProperties().getUnlockTimeout();
+            acceptor.stopMillis(acceptorWaitMilliSeconds);
             if (poller != null) {
                 poller.destroy();
                 poller = null;
@@ -342,8 +339,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
      */
     @Override
     public void unbind() throws Exception {
-        if (log.isDebugEnabled()) {
-            log.debug("Destroy initiated for " +
+        if (log.isTraceEnabled()) {
+            log.trace("Destroy initiated for " +
                     new InetSocketAddress(getAddress(),getPortWithOffset()));
         }
         if (running) {
@@ -359,8 +356,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
         if (getHandler() != null ) {
             getHandler().recycle();
         }
-        if (log.isDebugEnabled()) {
-            log.debug("Destroy completed for " +
+        if (log.isTraceEnabled()) {
+            log.trace("Destroy completed for " +
                     new InetSocketAddress(getAddress(), getPortWithOffset()));
         }
     }
@@ -687,7 +684,9 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                 SocketChannel sc = socketWrapper.getSocket().getIOChannel();
                 int interestOps = pe.getInterestOps();
                 if (sc == null) {
-                    log.warn(sm.getString("endpoint.nio.nullSocketChannel"));
+                    if (log.isDebugEnabled()) {
+                        log.debug(sm.getString("endpoint.nio.nullSocketChannel"));
+                    }
                     socketWrapper.close();
                 } else if (interestOps == OP_REGISTER) {
                     try {
@@ -907,8 +906,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                     }
                 }
                 if (sd.length <= 0 && sc.getOutboundRemaining()<=0) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("Send file complete for: " + sd.fileName);
+                    if (log.isTraceEnabled()) {
+                        log.trace("Send file complete for: " + sd.fileName);
                     }
                     socketWrapper.setSendfileData(null);
                     try {
@@ -921,15 +920,15 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                     if (!calledByProcessor) {
                         switch (sd.keepAliveState) {
                         case NONE: {
-                            if (log.isDebugEnabled()) {
-                                log.debug("Send file connection is being closed");
+                            if (log.isTraceEnabled()) {
+                                log.trace("Send file connection is being closed");
                             }
                             socketWrapper.close();
                             break;
                         }
                         case PIPELINED: {
-                            if (log.isDebugEnabled()) {
-                                log.debug("Connection is keep alive, processing pipe-lined data");
+                            if (log.isTraceEnabled()) {
+                                log.trace("Connection is keep alive, processing pipe-lined data");
                             }
                             if (!processSocket(socketWrapper, SocketEvent.OPEN_READ, true)) {
                                 socketWrapper.close();
@@ -937,8 +936,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                             break;
                         }
                         case OPEN: {
-                            if (log.isDebugEnabled()) {
-                                log.debug("Connection is keep alive, registering back for OP_READ");
+                            if (log.isTraceEnabled()) {
+                                log.trace("Connection is keep alive, registering back for OP_READ");
                             }
                             reg(sk, socketWrapper, SelectionKey.OP_READ);
                             break;
@@ -947,8 +946,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                     }
                     return SendfileState.DONE;
                 } else {
-                    if (log.isDebugEnabled()) {
-                        log.debug("OP_WRITE for sendfile: " + sd.fileName);
+                    if (log.isTraceEnabled()) {
+                        log.trace("OP_WRITE for sendfile: " + sd.fileName);
                     }
                     if (calledByProcessor) {
                         add(socketWrapper, SelectionKey.OP_WRITE);
@@ -959,7 +958,7 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                 }
             } catch (IOException e) {
                 if (log.isDebugEnabled()) {
-                    log.debug("Unable to complete sendfile request:", e);
+                    log.debug(sm.getString("endpoint.sendfile.error"), e);
                 }
                 if (!calledByProcessor && sc != null) {
                     socketWrapper.close();
@@ -1187,15 +1186,15 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
             if (to.remaining() >= limit) {
                 to.limit(to.position() + limit);
                 nRead = fillReadBuffer(block, to);
-                if (log.isDebugEnabled()) {
-                    log.debug("Socket: [" + this + "], Read direct from socket: [" + nRead + "]");
+                if (log.isTraceEnabled()) {
+                    log.trace("Socket: [" + this + "], Read direct from socket: [" + nRead + "]");
                 }
                 updateLastRead();
             } else {
                 // Fill the read buffer as best we can.
                 nRead = fillReadBuffer(block);
-                if (log.isDebugEnabled()) {
-                    log.debug("Socket: [" + this + "], Read into buffer: [" + nRead + "]");
+                if (log.isTraceEnabled()) {
+                    log.trace("Socket: [" + this + "], Read into buffer: [" + nRead + "]");
                 }
                 updateLastRead();
 
@@ -1211,8 +1210,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
 
         @Override
         protected void doClose() {
-            if (log.isDebugEnabled()) {
-                log.debug("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
+            if (log.isTraceEnabled()) {
+                log.trace("Calling [" + getEndpoint() + "].closeSocket([" + this + "])");
             }
             try {
                 getEndpoint().connections.remove(getSocket().getIOChannel());
@@ -1426,8 +1425,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
 
         @Override
         public void registerReadInterest() {
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("endpoint.debug.registerRead", this));
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("endpoint.debug.registerRead", this));
             }
             getPoller().add(this, SelectionKey.OP_READ);
         }
@@ -1435,8 +1434,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
 
         @Override
         public void registerWriteInterest() {
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("endpoint.debug.registerWrite", this));
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("endpoint.debug.registerWrite", this));
             }
             getPoller().add(this, SelectionKey.OP_WRITE);
         }
@@ -1452,8 +1451,12 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
         public SendfileState processSendfile(SendfileDataBase sendfileData) {
             setSendfileData((SendfileData) sendfileData);
             SelectionKey key = getSocket().getIOChannel().keyFor(getPoller().getSelector());
-            // Might as well do the first write on this thread
-            return getPoller().processSendfile(key, this, true);
+            if (key == null) {
+                return SendfileState.ERROR;
+            } else {
+                // Might as well do the first write on this thread
+                return getPoller().processSendfile(key, this, true);
+            }
         }
 
 
@@ -1595,8 +1598,8 @@ public class NioEndpoint extends AbstractNetworkChannelEndpoint<NioChannel,Socke
                             if (!completionDone) {
                                 // This filters out same notification until processing
                                 // of the current one is done
-                                if (log.isDebugEnabled()) {
-                                    log.debug("Skip concurrent " + (read ? "read" : "write") + " notification");
+                                if (log.isTraceEnabled()) {
+                                    log.trace("Skip concurrent " + (read ? "read" : "write") + " notification");
                                 }
                                 return;
                             }

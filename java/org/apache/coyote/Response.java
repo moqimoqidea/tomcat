@@ -82,7 +82,7 @@ public final class Response {
     final MimeHeaders headers = new MimeHeaders();
 
 
-    private Supplier<Map<String, String>> trailerFieldsSupplier = null;
+    private Supplier<Map<String,String>> trailerFieldsSupplier = null;
 
     /**
      * Associated output buffer.
@@ -284,7 +284,9 @@ public final class Response {
      * @param ex The exception that occurred
      */
     public void setErrorException(Exception ex) {
-        errorException = ex;
+        if (errorException == null) {
+            errorException = ex;
+        }
     }
 
 
@@ -331,6 +333,11 @@ public final class Response {
     }
 
 
+    public void resetError() {
+        errorState.set(0);
+    }
+
+
     // -------------------- Methods --------------------
 
     public void reset() throws IllegalStateException {
@@ -339,7 +346,7 @@ public final class Response {
             throw new IllegalStateException();
         }
 
-        recycle();
+        recycle(false);
     }
 
 
@@ -392,7 +399,7 @@ public final class Response {
     }
 
 
-    public void setTrailerFields(Supplier<Map<String, String>> supplier) {
+    public void setTrailerFields(Supplier<Map<String,String>> supplier) {
         AtomicBoolean trailerFieldsSupported = new AtomicBoolean(false);
         action(ActionCode.IS_TRAILER_FIELDS_SUPPORTED, trailerFieldsSupported);
         if (!trailerFieldsSupported.get()) {
@@ -403,7 +410,7 @@ public final class Response {
     }
 
 
-    public Supplier<Map<String, String>> getTrailerFields() {
+    public Supplier<Map<String,String>> getTrailerFields() {
         return trailerFieldsSupplier;
     }
 
@@ -439,10 +446,9 @@ public final class Response {
 
 
     /**
-     * Signal that we're done with the headers, and body will follow. Any implementation needs to notify ContextManager,
-     * to allow interceptors to fix headers.
+     * Signal that we're done with the headers, and body will follow.
      */
-    public void sendHeaders() {
+    public void commit() {
         action(ActionCode.COMMIT, this);
         setCommitted(true);
     }
@@ -568,8 +574,6 @@ public final class Response {
             return;
         }
 
-        this.contentType = m.toStringNoCharset();
-
         String charsetValue = m.getCharset();
 
         if (charsetValue == null) {
@@ -640,10 +644,13 @@ public final class Response {
         contentWritten += len - chunk.remaining();
     }
 
-    // --------------------
 
     public void recycle() {
+        recycle(true);
+    }
 
+
+    private void recycle(boolean responseComplete) {
         contentType = null;
         contentLanguage = null;
         locale = DEFAULT_LOCALE;
@@ -654,8 +661,8 @@ public final class Response {
         committed = false;
         commitTimeNanos = -1;
         errorException = null;
-        errorState.set(0);
-        headers.clear();
+        resetError();
+        headers.recycle();
         trailerFieldsSupplier = null;
         // Servlet 3.1 non-blocking write listener
         listener = null;
@@ -666,7 +673,19 @@ public final class Response {
 
         // update counters
         contentWritten = 0;
+
+        if (responseComplete && hook instanceof NonPipeliningProcessor) {
+            /*
+             * No requirement to maintain state between responses so clear the hook (a.k.a. Processor) and the output
+             * buffer to aid GC.
+             *
+             * Only clear these between responses. They need to be retained when the response is reset.
+             */
+            setHook(null);
+            setOutputBuffer(null);
+        }
     }
+
 
     /**
      * Bytes written by application - i.e. before compression, chunking, etc.

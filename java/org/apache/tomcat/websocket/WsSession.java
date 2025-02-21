@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -115,6 +116,7 @@ public class WsSession implements Session {
     private volatile long lastActiveRead = System.currentTimeMillis();
     private volatile long lastActiveWrite = System.currentTimeMillis();
     private Map<FutureToSendHandler, FutureToSendHandler> futures = new ConcurrentHashMap<>();
+    private volatile Long sessionCloseTimeoutExpiry;
 
 
     /**
@@ -169,8 +171,8 @@ public class WsSession implements Session {
 
         this.localEndpoint = clientEndpointHolder.getInstance(getInstanceManager());
 
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("wsSession.created", id));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("wsSession.created", id));
         }
     }
 
@@ -268,8 +270,8 @@ public class WsSession implements Session {
             this.localEndpoint = new PojoEndpointServer(pathParameters, endpointInstance);
         }
 
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("wsSession.created", id));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("wsSession.created", id));
         }
     }
 
@@ -570,8 +572,8 @@ public class WsSession implements Session {
             return;
         }
 
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("wsSession.doClose", id));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("wsSession.doClose", id));
         }
 
         // Flush any batched messages not yet sent.
@@ -593,7 +595,14 @@ public class WsSession implements Session {
              */
             state.set(State.CLOSED);
             // ... and close the network connection.
-            wsRemoteEndpoint.close();
+            closeConnection();
+        } else {
+            /*
+             * Set close timeout. If the client fails to send a close message response within the timeout, the session
+             * and the connection will be closed when the timeout expires.
+             */
+            sessionCloseTimeoutExpiry =
+                    Long.valueOf(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(getSessionCloseTimeout()));
         }
 
         // Fail any uncompleted messages.
@@ -612,6 +621,9 @@ public class WsSession implements Session {
      * @param closeReason The reason contained within the received close message.
      */
     public void onClose(CloseReason closeReason) {
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("wsSession.onClose.entry", closeReason, getId(), state));
+        }
         if (state.compareAndSet(State.OPEN, State.CLOSING)) {
             // Standard close.
 
@@ -632,7 +644,7 @@ public class WsSession implements Session {
             state.set(State.CLOSED);
 
             // Close the network connection.
-            wsRemoteEndpoint.close();
+            closeConnection();
         } else if (state.compareAndSet(State.OUTPUT_CLOSING, State.CLOSING)) {
             /*
              * The local endpoint sent a close message the the same time as the remote endpoint. The local close is
@@ -644,9 +656,68 @@ public class WsSession implements Session {
              * The local endpoint sent the first close message. The remote endpoint has now responded with its own close
              * message so mark the session as fully closed and close the network connection.
              */
-            wsRemoteEndpoint.close();
+            closeConnection();
         }
         // CLOSING and CLOSED are NO-OPs
+    }
+
+
+    private void closeConnection() {
+        /*
+         * Close the network connection.
+         */
+        wsRemoteEndpoint.close();
+        /*
+         * Don't unregister the session until the connection is fully closed since webSocketContainer is responsible for
+         * tracking the session close timeout.
+         */
+        webSocketContainer.unregisterSession(getSessionMapKey(), this);
+    }
+
+
+    /*
+     * Returns the session close timeout in milliseconds
+     */
+    protected long getSessionCloseTimeout() {
+        long result = 0;
+        Object obj = userProperties.get(Constants.SESSION_CLOSE_TIMEOUT_PROPERTY);
+        if (obj instanceof Long) {
+            result = ((Long) obj).intValue();
+        }
+        if (result <= 0) {
+            result = Constants.DEFAULT_SESSION_CLOSE_TIMEOUT;
+        }
+        return result;
+    }
+
+
+    /*
+     * Returns the session close timeout in milliseconds
+     */
+    private long getAbnormalSessionCloseSendTimeout() {
+        long result = 0;
+        Object obj = userProperties.get(Constants.ABNORMAL_SESSION_CLOSE_SEND_TIMEOUT_PROPERTY);
+        if (obj instanceof Long) {
+            result = ((Long) obj).longValue();
+        }
+        if (result <= 0) {
+            result = Constants.DEFAULT_ABNORMAL_SESSION_CLOSE_SEND_TIMEOUT;
+        }
+        return result;
+    }
+
+
+    protected void checkCloseTimeout() {
+        // Skip the check if no session close timeout has been set.
+        if (sessionCloseTimeoutExpiry != null) {
+            // Check if the timeout has expired.
+            if (System.nanoTime() - sessionCloseTimeoutExpiry.longValue() > 0) {
+                // Check if the session has been closed in another thread while the timeout was being processed.
+                if (state.compareAndSet(State.OUTPUT_CLOSED, State.CLOSED)) {
+                    closeConnection();
+                }
+            }
+        }
     }
 
 
@@ -715,14 +786,19 @@ public class WsSession implements Session {
         }
         msg.flip();
         try {
-            wsRemoteEndpoint.sendMessageBlock(Constants.OPCODE_CLOSE, msg, true);
+            if (closeCode == CloseCodes.NORMAL_CLOSURE) {
+                wsRemoteEndpoint.sendMessageBlock(Constants.OPCODE_CLOSE, msg, true);
+            } else {
+                wsRemoteEndpoint.sendMessageBlock(Constants.OPCODE_CLOSE, msg, true,
+                        getAbnormalSessionCloseSendTimeout());
+            }
         } catch (IOException | IllegalStateException e) {
             // Failed to send close message. Close the socket and let the caller
             // deal with the Exception
             if (log.isDebugEnabled()) {
                 log.debug(sm.getString("wsSession.sendCloseFail", id), e);
             }
-            wsRemoteEndpoint.close();
+            closeConnection();
             // Failure to send a close message is not unexpected in the case of
             // an abnormal closure (usually triggered by a failure to read/write
             // from/to the client. In this case do not trigger the endpoint's
@@ -730,8 +806,6 @@ public class WsSession implements Session {
             if (closeCode != CloseCodes.CLOSED_ABNORMALLY) {
                 localEndpoint.onError(this, e);
             }
-        } finally {
-            webSocketContainer.unregisterSession(getSessionMapKey(), this);
         }
     }
 
@@ -864,6 +938,11 @@ public class WsSession implements Session {
     @Override
     public Principal getUserPrincipal() {
         checkState();
+        return getUserPrincipalInternal();
+    }
+
+
+    public Principal getUserPrincipalInternal() {
         return userPrincipal;
     }
 

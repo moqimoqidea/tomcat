@@ -41,8 +41,11 @@ import org.apache.tomcat.util.IntrospectionUtils;
 import org.apache.tomcat.util.buf.B2CConverter;
 import org.apache.tomcat.util.buf.CharsetUtil;
 import org.apache.tomcat.util.buf.EncodedSolidusHandling;
+import org.apache.tomcat.util.buf.StringUtils;
+import org.apache.tomcat.util.compat.JreCompat;
 import org.apache.tomcat.util.net.SSLHostConfig;
 import org.apache.tomcat.util.net.openssl.OpenSSLImplementation;
+import org.apache.tomcat.util.net.openssl.OpenSSLStatus;
 import org.apache.tomcat.util.res.StringManager;
 
 
@@ -267,7 +270,13 @@ public class Connector extends LifecycleMBeanBase {
 
 
     /**
-     * The behavior when an encoded solidus (slash) is submitted.
+     * The behavior when an encoded reverse solidus (backslash - \) is submitted.
+     */
+    private EncodedSolidusHandling encodedReverseSolidusHandling = EncodedSolidusHandling.DECODE;
+
+
+    /**
+     * The behavior when an encoded solidus (slash - /) is submitted.
      */
     private EncodedSolidusHandling encodedSolidusHandling = EncodedSolidusHandling.REJECT;
 
@@ -526,7 +535,7 @@ public class Connector extends LifecycleMBeanBase {
         HashSet<String> methodSet = new HashSet<>();
 
         if (null != methods) {
-            methodSet.addAll(Arrays.asList(methods.split("\\s*,\\s*")));
+            methodSet.addAll(Arrays.asList(StringUtils.splitCommaSeparated(methods)));
         }
 
         if (methodSet.contains("TRACE")) {
@@ -863,6 +872,21 @@ public class Connector extends LifecycleMBeanBase {
     }
 
 
+    public String getEncodedReverseSolidusHandling() {
+        return encodedReverseSolidusHandling.getValue();
+    }
+
+
+    public void setEncodedReverseSolidusHandling(String encodedReverseSolidusHandling) {
+        this.encodedReverseSolidusHandling = EncodedSolidusHandling.fromString(encodedReverseSolidusHandling);
+    }
+
+
+    public EncodedSolidusHandling getEncodedReverseSolidusHandlingInternal() {
+        return encodedReverseSolidusHandling;
+    }
+
+
     public String getEncodedSolidusHandling() {
         return encodedSolidusHandling.getValue();
     }
@@ -1006,14 +1030,25 @@ public class Connector extends LifecycleMBeanBase {
             setParseBodyMethods(getParseBodyMethods());
         }
 
-        if (AprStatus.isAprAvailable() && AprStatus.getUseOpenSSL() &&
+        if (JreCompat.isJre22Available() && OpenSSLStatus.getUseOpenSSL() && OpenSSLStatus.isAvailable() &&
                 protocolHandler instanceof AbstractHttp11Protocol) {
+            // Use FFM and OpenSSL if available
+            AbstractHttp11Protocol<?> jsseProtocolHandler = (AbstractHttp11Protocol<?>) protocolHandler;
+            if (jsseProtocolHandler.isSSLEnabled() && jsseProtocolHandler.getSslImplementationName() == null) {
+                // OpenSSL is compatible with the JSSE configuration, so use it if it is available
+                jsseProtocolHandler
+                        .setSslImplementationName("org.apache.tomcat.util.net.openssl.panama.OpenSSLImplementation");
+            }
+        } else if (AprStatus.isAprAvailable() && AprStatus.getUseOpenSSL() &&
+                protocolHandler instanceof AbstractHttp11Protocol) {
+            // Use tomcat-native and OpenSSL otherwise, if available
             AbstractHttp11Protocol<?> jsseProtocolHandler = (AbstractHttp11Protocol<?>) protocolHandler;
             if (jsseProtocolHandler.isSSLEnabled() && jsseProtocolHandler.getSslImplementationName() == null) {
                 // OpenSSL is compatible with the JSSE configuration, so use it if APR is available
                 jsseProtocolHandler.setSslImplementationName(OpenSSLImplementation.class.getName());
             }
         }
+        // Otherwise the default JSSE will be used
 
         try {
             protocolHandler.init();
@@ -1097,10 +1132,6 @@ public class Connector extends LifecycleMBeanBase {
     }
 
 
-    /**
-     * Provide a useful toString() implementation as it may be used when logging Lifecycle errors to identify the
-     * component.
-     */
     @Override
     public String toString() {
         // Not worth caching this right now

@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.net.HttpURLConnection;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +69,11 @@ public class TestRewriteValve extends TomcatBaseTest {
     @Test
     public void testNoopRewrite() throws Exception {
         doTestRewrite("RewriteRule ^(.*) $1", "/a/%255A", "/a/%255A");
+    }
+
+    @Test
+    public void testNoopValveSkipRewrite() throws Exception {
+        doTestRewrite("RewriteRule ^(.*) $1 [VS]", "/a/%255A", "/a/%255A", null, null, true);
     }
 
     @Test
@@ -260,7 +266,7 @@ public class TestRewriteValve extends TomcatBaseTest {
         try {
             doTestRewrite("RewriteRule /b/(.*).html$ /c%_{SERVLET_PATH}", "/b/x.html", "/c");
             Assert.fail("IAE expected.");
-        } catch (java.lang.IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
             // expected as %_{ is invalid
         }
     }
@@ -270,7 +276,7 @@ public class TestRewriteValve extends TomcatBaseTest {
         try {
             doTestRewrite("RewriteRule /b/(.*).html$ /c$_{SERVLET_PATH}", "/b/x.html", "/c");
             Assert.fail("IAE expected.");
-        } catch (java.lang.IllegalArgumentException e) {
+        } catch (IllegalArgumentException e) {
             // expected as $_{ is invalid
         }
     }
@@ -612,6 +618,23 @@ public class TestRewriteValve extends TomcatBaseTest {
                 "/c", null, "aAa");
     }
 
+    @Test
+    public void testRewriteEmptyHeader() throws Exception {
+
+        // Disable the following of redirects for this test only
+        boolean originalValue = HttpURLConnection.getFollowRedirects();
+        HttpURLConnection.setFollowRedirects(false);
+        try {
+            Map<String, List<String>> resHead = new HashMap<>();
+            Map<String, List<String>> reqHead = new HashMap<>();
+            reqHead.put("\"\"", Arrays.asList(new String[]{"Test"}));
+            doTestRewriteEx("RewriteCond %{HTTP:} .+\nRewriteRule .* - [F]", "",
+                null, null, null, false, resHead, reqHead);
+        } finally {
+            HttpURLConnection.setFollowRedirects(originalValue);
+        }
+    }
+
 
     @Test
     public void testHostRewrite() throws Exception {
@@ -730,14 +753,33 @@ public class TestRewriteValve extends TomcatBaseTest {
 
     private void doTestRewrite(String config, String request, String expectedURI, String expectedQueryString,
             String expectedAttributeValue) throws Exception {
+        doTestRewrite(config, request, expectedURI, expectedQueryString, expectedAttributeValue, false);
+    }
+
+    private void doTestRewrite(String config, String request, String expectedURI, String expectedQueryString,
+            String expectedAttributeValue, boolean valveSkip) throws Exception {
+        doTestRewriteEx(config, request, expectedURI, expectedQueryString,
+                expectedAttributeValue, valveSkip, null, null);
+    }
+
+    private void doTestRewriteEx(String config, String request, String expectedURI, String expectedQueryString,
+            String expectedAttributeValue, boolean valveSkip, Map<String, List<String>> resHead, Map<String, List<String>> reqHead ) throws Exception {
 
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         RewriteValve rewriteValve = new RewriteValve();
         ctx.getPipeline().addValve(rewriteValve);
+        if (valveSkip) {
+            ctx.getPipeline().addValve(new ValveBase() {
+                @Override
+                public void invoke(Request request, Response response) throws IOException, ServletException {
+                    throw new IllegalStateException();
+                }
+            });
+        }
 
         rewriteValve.setConfiguration(config);
 
@@ -751,7 +793,10 @@ public class TestRewriteValve extends TomcatBaseTest {
         tomcat.start();
 
         ByteChunk res = new ByteChunk();
-        int rc = getUrl("http://localhost:" + getPort() + request, res, null);
+        int rc = methodUrl("http://localhost:" + getPort() + request, res, DEFAULT_CLIENT_TIMEOUT_MS,
+            reqHead,
+            resHead,
+            "GET", true);
         res.setCharset(StandardCharsets.UTF_8);
 
         if (expectedURI == null) {
@@ -837,7 +882,7 @@ public class TestRewriteValve extends TomcatBaseTest {
         tomcat.start();
 
         Map<String, List<String>> reqHead = new HashMap<>();
-        reqHead.put("cookie", List.of("test=data"));
+        reqHead.put("cookie", Arrays.asList("test=data"));
         ByteChunk res = new ByteChunk();
         int rc = methodUrl("http://localhost:" + getPort() + "/source/cookieTest", res, DEFAULT_CLIENT_TIMEOUT_MS,
                 reqHead, null, "GET", false);

@@ -37,6 +37,8 @@ import javax.naming.NamingException;
 import javax.sql.DataSource;
 
 import org.apache.catalina.Container;
+import org.apache.catalina.Server;
+import org.apache.catalina.Service;
 import org.apache.catalina.Session;
 import org.apache.juli.logging.Log;
 
@@ -138,9 +140,6 @@ public class DataSourceStore extends StoreBase {
         return name;
     }
 
-    /**
-     * @return the name for this Store, used for logging.
-     */
     @Override
     public String getStoreName() {
         return storeName;
@@ -365,7 +364,7 @@ public class DataSourceStore extends StoreBase {
                     }
                 }
             } catch (SQLException e) {
-                manager.getContext().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
+                manager.getContext().getLogger().error(sm.getString("dataSourceStore.SQLException", e));
                 keys = new String[0];
                 // Close the connection so that it gets reopened next time
             } finally {
@@ -376,14 +375,6 @@ public class DataSourceStore extends StoreBase {
         return keys;
     }
 
-    /**
-     * Return an integer containing a count of all Sessions currently saved in this Store. If there are no Sessions,
-     * <code>0</code> is returned.
-     *
-     * @return the count of all sessions currently saved in this Store
-     *
-     * @exception IOException if an input/output error occurred
-     */
     @Override
     public int getSize() throws IOException {
         int size = 0;
@@ -407,7 +398,7 @@ public class DataSourceStore extends StoreBase {
                     numberOfTries = 0;
                 }
             } catch (SQLException e) {
-                manager.getContext().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
+                manager.getContext().getLogger().error(sm.getString("dataSourceStore.SQLException", e));
             } finally {
                 release(_conn);
             }
@@ -416,17 +407,6 @@ public class DataSourceStore extends StoreBase {
         return size;
     }
 
-    /**
-     * Load the Session associated with the id <code>id</code>. If no such session is found <code>null</code> is
-     * returned.
-     *
-     * @param id a value of type <code>String</code>
-     *
-     * @return the stored <code>Session</code>
-     *
-     * @exception ClassNotFoundException if an error occurs
-     * @exception IOException            if an input/output error occurred
-     */
     @Override
     public Session load(String id) throws ClassNotFoundException, IOException {
         StandardSession _session = null;
@@ -450,8 +430,8 @@ public class DataSourceStore extends StoreBase {
                 try (ResultSet rst = preparedLoadSql.executeQuery()) {
                     if (rst.next()) {
                         try (ObjectInputStream ois = getObjectInputStream(rst.getBinaryStream(2))) {
-                            if (contextLog.isDebugEnabled()) {
-                                contextLog.debug(sm.getString(getStoreName() + ".loading", id, sessionTable));
+                            if (contextLog.isTraceEnabled()) {
+                                contextLog.trace(sm.getString("dataSourceStore.loading", id, sessionTable));
                             }
 
                             _session = (StandardSession) manager.createEmptySession();
@@ -459,13 +439,13 @@ public class DataSourceStore extends StoreBase {
                             _session.setManager(manager);
                         }
                     } else if (context.getLogger().isDebugEnabled()) {
-                        contextLog.debug(getStoreName() + ": No persisted data object found");
+                        contextLog.debug(sm.getString("dataSourceStore.noObject", id));
                     }
                     // Break out after the finally block
                     numberOfTries = 0;
                 }
             } catch (SQLException e) {
-                contextLog.error(sm.getString(getStoreName() + ".SQLException", e));
+                contextLog.error(sm.getString("dataSourceStore.SQLException", e));
             } finally {
                 context.unbind(oldThreadContextCL);
                 release(_conn);
@@ -475,14 +455,6 @@ public class DataSourceStore extends StoreBase {
         return _session;
     }
 
-    /**
-     * Remove the Session with the specified session identifier from this Store, if present. If no such Session is
-     * present, this method takes no action.
-     *
-     * @param id Session identifier of the Session to be removed
-     *
-     * @exception IOException if an input/output error occurs
-     */
     @Override
     public void remove(String id) throws IOException {
 
@@ -499,15 +471,15 @@ public class DataSourceStore extends StoreBase {
                 // Break out after the finally block
                 numberOfTries = 0;
             } catch (SQLException e) {
-                manager.getContext().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
+                manager.getContext().getLogger().error(sm.getString("dataSourceStore.SQLException", e));
             } finally {
                 release(_conn);
             }
             numberOfTries--;
         }
 
-        if (manager.getContext().getLogger().isDebugEnabled()) {
-            manager.getContext().getLogger().debug(sm.getString(getStoreName() + ".removing", id, sessionTable));
+        if (manager.getContext().getLogger().isTraceEnabled()) {
+            manager.getContext().getLogger().trace(sm.getString("dataSourceStore.removing", id, sessionTable));
         }
     }
 
@@ -530,11 +502,6 @@ public class DataSourceStore extends StoreBase {
         }
     }
 
-    /**
-     * Remove all of the Sessions in this Store.
-     *
-     * @exception IOException if an input/output error occurs
-     */
     @Override
     public void clear() throws IOException {
         String clearSql = "DELETE FROM " + sessionTable + " WHERE " + sessionAppCol + " = ?";
@@ -552,7 +519,7 @@ public class DataSourceStore extends StoreBase {
                 // Break out after the finally block
                 numberOfTries = 0;
             } catch (SQLException e) {
-                manager.getContext().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
+                manager.getContext().getLogger().error(sm.getString("dataSourceStore.SQLException", e));
             } finally {
                 release(_conn);
             }
@@ -560,13 +527,6 @@ public class DataSourceStore extends StoreBase {
         }
     }
 
-    /**
-     * Save a session to the Store.
-     *
-     * @param session the session to be stored
-     *
-     * @exception IOException if an input/output error occurs
-     */
     @Override
     public void save(Session session) throws IOException {
         ByteArrayOutputStream bos = null;
@@ -583,9 +543,7 @@ public class DataSourceStore extends StoreBase {
                 }
 
                 try {
-                    // If sessions already exist in DB, remove and insert again.
-                    // TODO:
-                    // * Check if ID exists in database and if so use UPDATE.
+                    // Remove session if it exists and insert again.
                     remove(session.getIdInternal(), _conn);
 
                     bos = new ByteArrayOutputStream();
@@ -608,7 +566,7 @@ public class DataSourceStore extends StoreBase {
                         numberOfTries = 0;
                     }
                 } catch (SQLException e) {
-                    manager.getContext().getLogger().error(sm.getString(getStoreName() + ".SQLException", e));
+                    manager.getContext().getLogger().error(sm.getString("dataSourceStore.SQLException", e));
                 } catch (IOException e) {
                     // Ignore
                 } finally {
@@ -618,9 +576,9 @@ public class DataSourceStore extends StoreBase {
             }
         }
 
-        if (manager.getContext().getLogger().isDebugEnabled()) {
+        if (manager.getContext().getLogger().isTraceEnabled()) {
             manager.getContext().getLogger()
-                    .debug(sm.getString(getStoreName() + ".saving", session.getIdInternal(), sessionTable));
+                    .trace(sm.getString("dataSourceStore.saving", session.getIdInternal(), sessionTable));
         }
     }
 
@@ -638,16 +596,14 @@ public class DataSourceStore extends StoreBase {
         try {
             conn = open();
             if (conn == null || conn.isClosed()) {
-                manager.getContext().getLogger().info(sm.getString(getStoreName() + ".checkConnectionDBClosed"));
+                manager.getContext().getLogger().info(sm.getString("dataSourceStore.checkConnectionDBClosed"));
                 conn = open();
                 if (conn == null || conn.isClosed()) {
-                    manager.getContext().getLogger()
-                            .info(sm.getString(getStoreName() + ".checkConnectionDBReOpenFail"));
+                    manager.getContext().getLogger().info(sm.getString("dataSourceStore.checkConnectionDBReOpenFail"));
                 }
             }
         } catch (SQLException ex) {
-            manager.getContext().getLogger()
-                    .error(sm.getString(getStoreName() + ".checkConnectionSQLException", ex.toString()));
+            manager.getContext().getLogger().error(sm.getString("dataSourceStore.checkConnectionSQLException", ex));
         }
 
         return conn;
@@ -663,29 +619,47 @@ public class DataSourceStore extends StoreBase {
     protected Connection open() throws SQLException {
         if (dataSourceName != null && dataSource == null) {
             org.apache.catalina.Context context = getManager().getContext();
-            ClassLoader oldThreadContextCL = null;
             if (getLocalDataSource()) {
-                oldThreadContextCL = context.bind(null);
-            }
-
-            Context initCtx;
-            try {
-                initCtx = new InitialContext();
-                Context envCtx = (Context) initCtx.lookup("java:comp/env");
-                this.dataSource = (DataSource) envCtx.lookup(this.dataSourceName);
-            } catch (NamingException e) {
-                context.getLogger().error(sm.getString(getStoreName() + ".wrongDataSource", this.dataSourceName), e);
-            } finally {
-                if (getLocalDataSource()) {
+                ClassLoader oldThreadContextCL = context.bind(null);
+                try {
+                    Context envCtx = (Context) (new InitialContext()).lookup("java:comp/env");
+                    this.dataSource = (DataSource) envCtx.lookup(this.dataSourceName);
+                } catch (NamingException e) {
+                    context.getLogger().error(sm.getString("dataSourceStore.wrongDataSource", this.dataSourceName), e);
+                } finally {
                     context.unbind(oldThreadContextCL);
                 }
+            } else {
+                try {
+                    // This should be the normal way to lookup for the global in the global context (no comp/env)
+                    Service service = Container.getService(context);
+                    if (service != null) {
+                        Server server = service.getServer();
+                        if (server != null) {
+                            Context namingContext = server.getGlobalNamingContext();
+                            this.dataSource = (DataSource) namingContext.lookup(dataSourceName);
+                        }
+                    }
+                } catch (NamingException e) {
+                    // Ignore, try another way for compatibility
+                }
+                if (this.dataSource == null) {
+                    try {
+                        Context envCtx = (Context) (new InitialContext()).lookup("java:comp/env");
+                        this.dataSource = (DataSource) envCtx.lookup(this.dataSourceName);
+                    } catch (NamingException e) {
+                        context.getLogger().error(sm.getString("dataSourceStore.wrongDataSource", this.dataSourceName),
+                                e);
+                    }
+                }
             }
+
         }
 
         if (dataSource != null) {
             return dataSource.getConnection();
         } else {
-            throw new IllegalStateException(sm.getString(getStoreName() + ".missingDataSource"));
+            throw new IllegalStateException(sm.getString("dataSourceStore.missingDataSource"));
         }
     }
 
@@ -707,15 +681,14 @@ public class DataSourceStore extends StoreBase {
                 dbConnection.commit();
             }
         } catch (SQLException e) {
-            manager.getContext().getLogger().error(sm.getString(getStoreName() + ".commitSQLException"), e);
+            manager.getContext().getLogger().error(sm.getString("dataSourceStore.commitSQLException"), e);
         }
 
         // Close this database connection, and log any errors
         try {
             dbConnection.close();
         } catch (SQLException e) {
-            manager.getContext().getLogger().error(sm.getString(getStoreName() + ".close", e.toString())); // Just log
-                                                                                                           // it here
+            manager.getContext().getLogger().error(sm.getString("dataSourceStore.close", e));
         }
     }
 

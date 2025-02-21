@@ -208,7 +208,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
                 }
             } catch (IOException ioe) {
                 if (getLog().isDebugEnabled()) {
-                    getLog().debug("Unable to write async data.", ioe);
+                    getLog().debug(sm.getString("abstractProcessor.asyncFail"), ioe);
                 }
                 status = SocketEvent.ERROR;
                 request.setAttribute(RequestDispatcher.ERROR_EXCEPTION, ioe);
@@ -238,7 +238,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
 
         RequestInfo rp = request.getRequestProcessor();
         try {
-            rp.setStage(org.apache.coyote.Constants.STAGE_SERVICE);
+            rp.setStage(Constants.STAGE_SERVICE);
             if (!getAdapter().asyncDispatch(request, response, status)) {
                 setErrorState(ErrorState.CLOSE_NOW, null);
             }
@@ -250,7 +250,7 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
             getLog().error(sm.getString("http11processor.request.process"), t);
         }
 
-        rp.setStage(org.apache.coyote.Constants.STAGE_ENDED);
+        rp.setStage(Constants.STAGE_ENDED);
 
         SocketState state;
 
@@ -264,8 +264,8 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
             state = dispatchEndRequest();
         }
 
-        if (getLog().isDebugEnabled()) {
-            getLog().debug("Socket: [" + socketWrapper + "], Status in: [" + status + "], State out: [" + state + "]");
+        if (getLog().isTraceEnabled()) {
+            getLog().trace("Socket: [" + socketWrapper + "], Status in: [" + status + "], State out: [" + state + "]");
         }
 
         return state;
@@ -391,6 +391,14 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
             }
             case ACK: {
                 ack((ContinueResponseTiming) param);
+                break;
+            }
+            case EARLY_HINTS: {
+                try {
+                    earlyHints();
+                } catch (IOException e) {
+                    handleIOException(e);
+                }
                 break;
             }
             case CLIENT_FLUSH: {
@@ -597,6 +605,10 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
                 addDispatch(DispatchType.NON_BLOCKING_WRITE);
                 break;
             }
+            case DISPATCH_ERROR: {
+                addDispatch(DispatchType.NON_BLOCKING_ERROR);
+                break;
+            }
             case DISPATCH_EXECUTE: {
                 executeDispatches();
                 break;
@@ -605,17 +617,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
             // Servlet 3.1 HTTP Upgrade
             case UPGRADE: {
                 doHttpUpgrade((UpgradeToken) param);
-                break;
-            }
-
-            // Servlet 4.0 Push requests
-            case IS_PUSH_SUPPORTED: {
-                AtomicBoolean result = (AtomicBoolean) param;
-                result.set(isPushSupported());
-                break;
-            }
-            case PUSH_REQUEST: {
-                doPush((Request) param);
                 break;
             }
 
@@ -724,27 +725,69 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
     }
 
 
+    /**
+     * When committing the response, we have to validate the set of headers, as well as setup the response filters.
+     *
+     * @throws IOException IO exception during commit
+     */
     protected abstract void prepareResponse() throws IOException;
 
 
+    /**
+     * Finish the current response.
+     *
+     * @throws IOException IO exception during the write
+     */
     protected abstract void finishResponse() throws IOException;
 
 
+    /**
+     * Process acknowledgment of the request.
+     *
+     * @param continueResponseTiming specifies when an acknowledgment should be sent
+     */
     protected abstract void ack(ContinueResponseTiming continueResponseTiming);
 
 
+    protected abstract void earlyHints() throws IOException;
+
+
+    /**
+     * Callback to write data from the buffer.
+     *
+     * @throws IOException IO exception during the write
+     */
     protected abstract void flush() throws IOException;
 
 
+    /**
+     * Queries if bytes are available in buffers.
+     *
+     * @param doRead {@code true} to perform a read when no bytes are availble
+     *
+     * @return the amount of bytes that are known to be available
+     */
     protected abstract int available(boolean doRead);
 
 
+    /**
+     * Set the specified byte chunk as the request body that will be read. This allows saving and processing requests.
+     *
+     * @param body the byte chunk containing all the request bytes
+     */
     protected abstract void setRequestBody(ByteChunk body);
 
 
+    /**
+     * The response is finished and no additional bytes need to be sent to the client.
+     */
     protected abstract void setSwallowResponse();
 
 
+    /**
+     * Swallowing bytes is required for pipelining requests, so this allows to avoid doing extra operations in case an
+     * error occurs and the connection is to be closed instead.
+     */
     protected abstract void disableSwallowRequest();
 
 
@@ -775,10 +818,16 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
      * Populate the TLS related request attributes from the {@link SSLSupport} instance associated with this processor.
      * Protocols that populate TLS attributes from a different source (e.g. AJP) should override this method.
      */
+    @SuppressWarnings("deprecation")
     protected void populateSslRequestAttributes() {
         try {
             if (sslSupport != null) {
-                Object sslO = sslSupport.getCipherSuite();
+                Object sslO = sslSupport.getProtocol();
+                if (sslO != null) {
+                    request.setAttribute(SSLSupport.SECURE_PROTOCOL_KEY, sslO);
+                    request.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
+                }
+                sslO = sslSupport.getCipherSuite();
                 if (sslO != null) {
                     request.setAttribute(SSLSupport.CIPHER_SUITE_KEY, sslO);
                 }
@@ -793,10 +842,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
                 sslO = sslSupport.getSessionId();
                 if (sslO != null) {
                     request.setAttribute(SSLSupport.SESSION_ID_KEY, sslO);
-                }
-                sslO = sslSupport.getProtocol();
-                if (sslO != null) {
-                    request.setAttribute(SSLSupport.PROTOCOL_VERSION_KEY, sslO);
                 }
                 sslO = sslSupport.getRequestedProtocols();
                 if (sslO != null) {
@@ -847,12 +892,22 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
     }
 
 
+    /**
+     * @return {@code true} if it is known that the request body has been fully read
+     */
     protected abstract boolean isRequestBodyFullyRead();
 
 
+    /**
+     * When using non blocking IO, register to get a callback when polling determines that bytes are available for
+     * reading.
+     */
     protected abstract void registerReadInterest();
 
 
+    /**
+     * @return {@code true} if bytes can be written without blocking
+     */
     protected abstract boolean isReadyForWrite();
 
 
@@ -927,29 +982,6 @@ public abstract class AbstractProcessor extends AbstractProcessorLight implement
     @Override
     public boolean isUpgrade() {
         return false;
-    }
-
-
-    /**
-     * Protocols that support push should override this method and return {@code
-     * true}.
-     *
-     * @return {@code true} if push is supported by this processor, otherwise {@code false}.
-     */
-    protected boolean isPushSupported() {
-        return false;
-    }
-
-
-    /**
-     * Process a push. Processors that support push should override this method and process the provided token.
-     *
-     * @param pushTarget Contains all the information necessary for the Processor to process the push request
-     *
-     * @throws UnsupportedOperationException if the protocol does not support push
-     */
-    protected void doPush(Request pushTarget) {
-        throw new UnsupportedOperationException(sm.getString("abstractProcessor.pushrequest.notsupported"));
     }
 
 

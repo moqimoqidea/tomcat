@@ -40,6 +40,7 @@ import org.apache.tomcat.unittest.TesterContext;
 import org.apache.tomcat.unittest.TesterRequest;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.collections.CaseInsensitiveKeyMap;
+import org.apache.tomcat.util.descriptor.web.ErrorPage;
 
 /**
  * Test case for {@link Request}.
@@ -52,7 +53,7 @@ public class TestResponse extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         Tomcat.addServlet(ctx, "servlet", new Bug49598Servlet());
         ctx.addServletMappingDecoded("/", "servlet");
@@ -108,7 +109,7 @@ public class TestResponse extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         Tomcat.addServlet(ctx, "servlet", new CharsetServlet());
         ctx.addServletMappingDecoded("/", "servlet");
@@ -147,7 +148,7 @@ public class TestResponse extends TomcatBaseTest {
         Tomcat tomcat = getTomcatInstance();
 
         // No file system docBase required
-        Context ctx = tomcat.addContext("", null);
+        Context ctx = getProgrammaticRootContext();
 
         Tomcat.addServlet(ctx, "servlet", new Bug52811Servlet());
         ctx.addServletMappingDecoded("/", "servlet");
@@ -957,6 +958,26 @@ public class TestResponse extends TomcatBaseTest {
         Assert.assertEquals(ISO_8859_1, response.getCharacterEncoding());
     }
 
+    @Test
+    public void testStatusChange() throws Exception {
+        // Setup Tomcat instance
+        Tomcat tomcat = getTomcatInstance();
+
+        // No file system docBase required
+        Context ctx = getProgrammaticRootContext();
+
+        Tomcat.addServlet(ctx, "servlet", new ErrorPageServlet());
+        ctx.addServletMappingDecoded("/error", "servlet");
+        ErrorPage servletErrorPage = new ErrorPage();
+        servletErrorPage.setErrorCode(404);
+        servletErrorPage.setLocation("/error");
+        ctx.addErrorPage(servletErrorPage);
+
+        tomcat.start();
+
+        int rc = getUrl("http://localhost:" + getPort() + "/missing", new ByteChunk(), null);
+        Assert.assertEquals(202, rc);
+    }
 
     private Response setupResponse() {
         Connector connector = new Connector();
@@ -996,5 +1017,18 @@ public class TestResponse extends TomcatBaseTest {
             }
         }
 
+    }
+
+    private static final class ErrorPageServlet extends HttpServlet {
+        private static final long serialVersionUID = 1L;
+        @Override
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp)
+                throws ServletException, IOException {
+            if (resp.getStatus() == 404) {
+                resp.setStatus(202);
+            } else {
+                resp.setStatus(500);
+            }
+        }
     }
 }

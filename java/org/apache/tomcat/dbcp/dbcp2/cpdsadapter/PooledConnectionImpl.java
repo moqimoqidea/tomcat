@@ -20,6 +20,7 @@ import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -43,7 +44,7 @@ import org.apache.tomcat.dbcp.pool2.PooledObject;
 import org.apache.tomcat.dbcp.pool2.impl.DefaultPooledObject;
 
 /**
- * Implementation of {@link PooledConnection} that is returned by {@link DriverAdapterCPDS}.
+ * Implements {@link PooledConnection} that is returned by {@link DriverAdapterCPDS}.
  *
  * @since 2.0
  */
@@ -91,7 +92,7 @@ final class PooledConnectionImpl
     private boolean accessToUnderlyingConnectionAllowed;
 
     /**
-     * Wraps the real connection.
+     * Wraps a real connection.
      *
      * @param connection
      *            the connection to be wrapped.
@@ -118,6 +119,9 @@ final class PooledConnectionImpl
         pooledObject.getObject().activate();
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void addConnectionEventListener(final ConnectionEventListener listener) {
         if (!eventListeners.contains(listener)) {
@@ -328,9 +332,16 @@ final class PooledConnectionImpl
      *            the wrapped {@link PreparedStatement} to be destroyed.
      */
     @Override
-    public void destroyObject(final PStmtKey key, final PooledObject<DelegatingPreparedStatement> pooledObject)
-            throws SQLException {
-        pooledObject.getObject().getInnermostDelegate().close();
+    public void destroyObject(final PStmtKey key, final PooledObject<DelegatingPreparedStatement> pooledObject) throws SQLException {
+        if (pooledObject != null) {
+            final DelegatingPreparedStatement object = pooledObject.getObject();
+            if (object != null) {
+                final Statement innermostDelegate = object.getInnermostDelegate();
+                if (innermostDelegate != null) {
+                    innermostDelegate.close();
+                }
+            }
+        }
     }
 
     /**
@@ -433,7 +444,7 @@ final class PooledConnectionImpl
     }
 
     /**
-     * My {@link KeyedPooledObjectFactory} method for passivating {@link PreparedStatement}s. Currently invokes
+     * My {@link KeyedPooledObjectFactory} method for passivating {@link PreparedStatement}s. Currently, invokes
      * {@link PreparedStatement#clearParameters}.
      *
      * @param key
@@ -453,7 +464,7 @@ final class PooledConnectionImpl
      * Creates or obtains a {@link CallableStatement} from my pool.
      *
      * @param sql
-     *            an SQL statement that may contain one or more '?' parameter placeholders. Typically this statement is
+     *            an SQL statement that may contain one or more '?' parameter placeholders. Typically, this statement is
      *            specified using JDBC call escape syntax.
      * @return a default {@code CallableStatement} object containing the pre-compiled SQL statement.
      * @throws SQLException
@@ -663,6 +674,9 @@ final class PooledConnectionImpl
         }
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public void removeConnectionEventListener(final ConnectionEventListener listener) {
         eventListeners.remove(listener);

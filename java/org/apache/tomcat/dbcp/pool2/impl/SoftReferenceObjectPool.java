@@ -58,7 +58,6 @@ public class SoftReferenceObjectPool<T> extends BaseObjectPool<T> {
     /** Total number of instances that have been destroyed */
     private long destroyCount; // @GuardedBy("this")
 
-
     /** Total number of instances that have been created */
     private long createCount; // @GuardedBy("this")
 
@@ -132,7 +131,7 @@ public class SoftReferenceObjectPool<T> extends BaseObjectPool<T> {
         if (shouldDestroy) {
             try {
                 destroy(ref);
-            } catch (final Exception e) {
+            } catch (final Exception ignored) {
                 // ignored
             }
         }
@@ -238,8 +237,8 @@ public class SoftReferenceObjectPool<T> extends BaseObjectPool<T> {
                     if (null != ref.getObject()) {
                         factory.destroyObject(ref);
                     }
-                } catch (final Exception e) {
-                    // ignore error, keep destroying the rest
+                } catch (final Exception ignored) {
+                    // ignored, keep destroying the rest
                 }
             });
         }
@@ -267,7 +266,6 @@ public class SoftReferenceObjectPool<T> extends BaseObjectPool<T> {
      * references pools.
      *
      * @param toDestroy PooledSoftReference to destroy
-     *
      * @throws Exception If an error occurs while trying to destroy the object
      */
     private void destroy(final PooledSoftReference<T> toDestroy) throws Exception {
@@ -349,7 +347,7 @@ public class SoftReferenceObjectPool<T> extends BaseObjectPool<T> {
         removeClearedReferences(idleReferences.iterator());
         removeClearedReferences(allReferences.iterator());
         while (refQueue.poll() != null) {
-            // empty
+            // loop until null
         }
     }
 
@@ -421,7 +419,7 @@ public class SoftReferenceObjectPool<T> extends BaseObjectPool<T> {
         if (shouldDestroy && factory != null) {
             try {
                 destroy(ref);
-            } catch (final Exception e) {
+            } catch (final Exception ignored) {
                 // ignored
             }
         }

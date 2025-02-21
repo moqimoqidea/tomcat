@@ -35,6 +35,7 @@ import org.apache.catalina.Container;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
 import org.apache.catalina.core.AprLifecycleListener;
+import org.apache.catalina.core.OpenSSLLifecycleListener;
 import org.apache.catalina.core.StandardServer;
 import org.apache.catalina.startup.Tomcat;
 import org.apache.catalina.startup.TomcatBaseTest;
@@ -42,6 +43,8 @@ import org.apache.catalina.valves.ValveBase;
 import org.apache.tomcat.util.buf.ByteChunk;
 import org.apache.tomcat.util.net.SSLHostConfig;
 import org.apache.tomcat.util.net.TesterSupport;
+import org.apache.tomcat.util.net.openssl.OpenSSLImplementation;
+import org.apache.tomcat.util.net.openssl.OpenSSLStatus;
 
 @RunWith(Parameterized.class)
 public class TestResolverSSL extends TomcatBaseTest {
@@ -49,9 +52,12 @@ public class TestResolverSSL extends TomcatBaseTest {
     @Parameterized.Parameters(name = "{0}")
     public static Collection<Object[]> parameters() {
         List<Object[]> parameterSets = new ArrayList<>();
-        parameterSets.add(new Object[] { "JSSE", Boolean.FALSE, "org.apache.tomcat.util.net.jsse.JSSEImplementation" });
-        parameterSets.add(
-                new Object[] { "OpenSSL", Boolean.TRUE, "org.apache.tomcat.util.net.openssl.OpenSSLImplementation" });
+        parameterSets.add(new Object[] {
+                "JSSE", Boolean.FALSE, "org.apache.tomcat.util.net.jsse.JSSEImplementation"});
+        parameterSets.add(new Object[] {
+                "OpenSSL", Boolean.TRUE, "org.apache.tomcat.util.net.openssl.OpenSSLImplementation"});
+        parameterSets.add(new Object[] {
+                "OpenSSL-FFM", Boolean.TRUE, "org.apache.tomcat.util.net.openssl.panama.OpenSSLImplementation"});
 
         return parameterSets;
     }
@@ -60,7 +66,7 @@ public class TestResolverSSL extends TomcatBaseTest {
     public String connectorName;
 
     @Parameter(1)
-    public boolean needApr;
+    public boolean useOpenSSL;
 
     @Parameter(2)
     public String sslImplementationName;
@@ -77,6 +83,12 @@ public class TestResolverSSL extends TomcatBaseTest {
         sslHostConfig.setSessionCacheSize(20 * 1024);
 
         tomcat.start();
+
+        Assume.assumeFalse("LibreSSL does not allow renegotiation",
+                TesterSupport.isOpenSSLVariant(sslImplementationName, OpenSSLStatus.Name.LIBRESSL));
+        Assume.assumeFalse("BoringSSL does not allow TLS renegotiation",
+                TesterSupport.isOpenSSLVariant(sslImplementationName, OpenSSLStatus.Name.BORINGSSL));
+
         ByteChunk res = getUrl("https://localhost:" + getPort() + "/protected");
         // Just look a bit at the result
         System.out.println(res.toString());
@@ -172,11 +184,18 @@ public class TestResolverSSL extends TomcatBaseTest {
 
         Assert.assertTrue(tomcat.getConnector().setProperty("sslImplementationName", sslImplementationName));
 
-        if (needApr) {
-            AprLifecycleListener listener = new AprLifecycleListener();
-            Assume.assumeTrue(AprLifecycleListener.isAprAvailable());
-            StandardServer server = (StandardServer) tomcat.getServer();
-            server.addLifecycleListener(listener);
+        if (useOpenSSL) {
+            if (OpenSSLImplementation.class.getName().equals(sslImplementationName)) {
+                AprLifecycleListener listener = new AprLifecycleListener();
+                Assume.assumeTrue(AprLifecycleListener.isAprAvailable());
+                StandardServer server = (StandardServer) tomcat.getServer();
+                server.addLifecycleListener(listener);
+            } else if ("org.apache.tomcat.util.net.openssl.panama.OpenSSLImplementation".equals(sslImplementationName)) {
+                OpenSSLLifecycleListener listener = new OpenSSLLifecycleListener();
+                Assume.assumeTrue(OpenSSLLifecycleListener.isAvailable());
+                StandardServer server = (StandardServer) tomcat.getServer();
+                server.addLifecycleListener(listener);
+            }
         }
     }
 }

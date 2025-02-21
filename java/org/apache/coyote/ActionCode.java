@@ -26,8 +26,20 @@ package org.apache.coyote;
  * @author Remy Maucherat
  */
 public enum ActionCode {
+
+    /**
+     * Acknowledge request, most often used for HTTP expectations.
+     */
     ACK,
+
+    /**
+     * Regular close.
+     */
     CLOSE,
+
+    /**
+     * Response commit, which means any initial bytes part of the response are going to be sent.
+     */
     COMMIT,
 
     /**
@@ -226,21 +238,17 @@ public enum ActionCode {
     DISPATCH_WRITE,
 
     /**
+     * Indicates that the container needs to trigger a call to onError() for the registered non-blocking write and/or
+     * read listener(s).
+     */
+    DISPATCH_ERROR,
+
+    /**
      * Execute any non-blocking dispatches that have been registered via {@link #DISPATCH_READ} or
      * {@link #DISPATCH_WRITE}. Typically required when the non-blocking listeners are configured on a thread where the
      * processing wasn't triggered by a read or write event on the socket.
      */
     DISPATCH_EXECUTE,
-
-    /**
-     * Is server push supported and allowed for the current request?
-     */
-    IS_PUSH_SUPPORTED,
-
-    /**
-     * Push a request on behalf of the client of the current request.
-     */
-    PUSH_REQUEST,
 
     /**
      * Are the request trailer fields ready to be read? Note that this returns true if it is known that request trailer
@@ -263,5 +271,10 @@ public enum ActionCode {
     /**
      * Obtain the servlet connection instance for the network connection supporting the current request.
      */
-    SERVLET_CONNECTION
+    SERVLET_CONNECTION,
+
+    /**
+     * Send an RFC 8297 Early Hints informational response.
+     */
+    EARLY_HINTS
 }

@@ -92,9 +92,6 @@ public class Http11Processor extends AbstractProcessor {
     private final Http11OutputBuffer outputBuffer;
 
 
-    private final HttpParser httpParser;
-
-
     /**
      * Tracks how many internal filters are in the filter library so they are skipped when looking for pluggable
      * filters.
@@ -149,11 +146,22 @@ public class Http11Processor extends AbstractProcessor {
     private SendfileDataBase sendfileData = null;
 
 
+    /**
+     * Http parser.
+     */
+    private final HttpParser httpParser;
+
+
     public Http11Processor(AbstractHttp11Protocol<?> protocol, Adapter adapter) {
         super(adapter);
         this.protocol = protocol;
 
-        httpParser = new HttpParser(protocol.getRelaxedPathChars(), protocol.getRelaxedQueryChars());
+        HttpParser httpParser = protocol.getHttpParser();
+        if (httpParser == null) {
+            log.info(sm.getString("http11processor.noParser"));
+            httpParser = new HttpParser(protocol.getRelaxedPathChars(), protocol.getRelaxedQueryChars());
+        }
+        this.httpParser = httpParser;
 
         inputBuffer = new Http11InputBuffer(request, protocol.getMaxHttpRequestHeaderSize(), httpParser);
         request.setInputBuffer(inputBuffer);
@@ -166,9 +174,9 @@ public class Http11Processor extends AbstractProcessor {
         outputBuffer.addFilter(new IdentityOutputFilter());
 
         // Create and add the chunked filters.
-        inputBuffer.addFilter(
-                new ChunkedInputFilter(protocol.getMaxTrailerSize(), protocol.getAllowedTrailerHeadersInternal(),
-                        protocol.getMaxExtensionSize(), protocol.getMaxSwallowSize()));
+        inputBuffer.addFilter(new ChunkedInputFilter(request, protocol.getMaxTrailerSize(),
+                protocol.getAllowedTrailerHeadersInternal(), protocol.getMaxExtensionSize(),
+                protocol.getMaxSwallowSize()));
         outputBuffer.addFilter(new ChunkedOutputFilter());
 
         // Create and add the void filters.
@@ -210,8 +218,7 @@ public class Http11Processor extends AbstractProcessor {
             response.setStatus(400);
             setErrorState(ErrorState.CLOSE_CLEAN, null);
             if (log.isDebugEnabled()) {
-                log.debug(sm.getString("http11processor.request.prepare") +
-                        " Transfer encoding lists chunked before [" + encodingName + "]");
+                log.debug(sm.getString("http11processor.request.alreadyChunked", encodingName));
             }
             return;
         }
@@ -232,8 +239,7 @@ public class Http11Processor extends AbstractProcessor {
             response.setStatus(501);
             setErrorState(ErrorState.CLOSE_CLEAN, null);
             if (log.isDebugEnabled()) {
-                log.debug(sm.getString("http11processor.request.prepare") + " Unsupported transfer encoding [" +
-                        encodingName + "]");
+                log.debug(sm.getString("http11processor.request.unsupportedEncoding", encodingName));
             }
         }
     }
@@ -611,8 +617,7 @@ public class Http11Processor extends AbstractProcessor {
             response.setStatus(505);
             setErrorState(ErrorState.CLOSE_CLEAN, null);
             if (log.isDebugEnabled()) {
-                log.debug(sm.getString("http11processor.request.prepare") + " Unsupported HTTP version \"" +
-                        protocolMB + "\"");
+                log.debug(sm.getString("http11processor.request.unsupportedVersion", protocolMB));
             }
         }
     }
@@ -731,7 +736,7 @@ public class Http11Processor extends AbstractProcessor {
                     if (hostValueMB != null) {
                         // Any host in the request line must be consistent with
                         // the Host header
-                        if (!hostValueMB.getByteChunk().equals(uriB, uriBCStart + pos, slashPos - pos)) {
+                        if (!hostValueMB.getByteChunk().equalsIgnoreCase(uriB, uriBCStart + pos, slashPos - pos)) {
                             // The requirements of RFC 7230 are being
                             // applied. If the host header and the request
                             // line do not agree, trigger a 400 response.
@@ -858,9 +863,6 @@ public class Http11Processor extends AbstractProcessor {
     }
 
 
-    /**
-     * When committing the response, we have to validate the set of headers, as well as setup the response filters.
-     */
     @Override
     protected final void prepareResponse() throws IOException {
 
@@ -891,10 +893,9 @@ public class Http11Processor extends AbstractProcessor {
             }
         }
 
-        MessageBytes methodMB = request.method();
-        boolean head = methodMB.equals("HEAD");
+        boolean head = request.method().equals("HEAD");
         if (head) {
-            // No entity body
+            // Any entity body, if present, should not be sent
             outputBuffer.addActiveFilter(outputFilters[Constants.VOID_FILTER]);
             contentDelimitation = true;
         }
@@ -934,6 +935,13 @@ public class Http11Processor extends AbstractProcessor {
             headers.setValue("Content-Length").setLong(contentLength);
             outputBuffer.addActiveFilter(outputFilters[Constants.IDENTITY_FILTER]);
             contentDelimitation = true;
+        } else if (head) {
+            /*
+             * The OutputBuffer can't differentiate between a zero length response because GET would have produced a
+             * zero length body and a zero length response because HEAD didn't write any content. Therefore skip setting
+             * the "transfer-encoding: chunked" header as that may not be consistent with what would be seen with the
+             * equivalent GET.
+             */
         } else {
             // If the response code supports an entity body and we're on
             // HTTP 1.1 then we chunk unless we have a Connection: close header
@@ -956,7 +964,11 @@ public class Http11Processor extends AbstractProcessor {
             headers.addValue("Date").setString(FastHttpDateFormat.getCurrentDate());
         }
 
-        // FIXME: Add transfer encoding header
+        // Although using transfer-encoding for gzip would be doable and was
+        // the original intent (which means the compression would be from an
+        // endpoint to the next, so only for the current transmission), it
+        // has been found that using content-encoding (which is end to end
+        // compression) is more efficient and more reliable.
 
         if ((entityBody) && (!contentDelimitation) || connectionClosePresent) {
             // Disable keep-alive if:
@@ -968,8 +980,7 @@ public class Http11Processor extends AbstractProcessor {
             keepAlive = false;
         }
 
-        // This may disabled keep-alive to check before working out the
-        // Connection header.
+        // This may disable keep-alive so check before working out the Connection header
         checkExpectationAndResponseStatus();
 
         // This may disable keep-alive if there is more body to swallow
@@ -992,8 +1003,8 @@ public class Http11Processor extends AbstractProcessor {
             }
 
             if (protocol.getUseKeepAliveResponseHeader()) {
-                boolean connectionKeepAlivePresent = isConnectionToken(request.getMimeHeaders(),
-                        Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
+                boolean connectionKeepAlivePresent =
+                        isConnectionToken(request.getMimeHeaders(), Constants.KEEP_ALIVE_HEADER_VALUE_TOKEN);
 
                 if (connectionKeepAlivePresent) {
                     int keepAliveTimeout = protocol.getKeepAliveTimeout();
@@ -1030,18 +1041,15 @@ public class Http11Processor extends AbstractProcessor {
             headers.setValue("Server").setString(server);
         }
 
-        // Exclude some HTTP header fields where the value is determined only
-        // while generating the content as per section 9.3.2 of RFC 9110.
-        if (head) {
-            headers.removeHeader("content-length");
-            headers.removeHeader("content-range");
-            headers.removeHeader("trailer");
-            headers.removeHeader("transfer-encoding");
-        }
+        writeHeaders(response.getStatus(), headers);
 
-        // Build the response header
+        outputBuffer.commit();
+    }
+
+
+    private void writeHeaders(int status, MimeHeaders headers) {
         try {
-            outputBuffer.sendStatus();
+            outputBuffer.sendStatus(status);
 
             int size = headers.size();
             for (int i = 0; i < size; i++) {
@@ -1056,8 +1064,9 @@ public class Http11Processor extends AbstractProcessor {
                     size--;
                     // Header buffer is corrupted. Reset it and start again.
                     outputBuffer.resetHeaderBuffer();
-                    i = 0;
-                    outputBuffer.sendStatus();
+                    // -1 as it will be incremented at the start of the loop and header indexes start at 0.
+                    i = -1;
+                    outputBuffer.sendStatus(status);
                 }
             }
             outputBuffer.endHeaders();
@@ -1068,9 +1077,8 @@ public class Http11Processor extends AbstractProcessor {
             outputBuffer.resetHeaderBuffer();
             throw t;
         }
-
-        outputBuffer.commit();
     }
+
 
     private static boolean isConnectionToken(MimeHeaders headers, String token) throws IOException {
         MessageBytes connection = headers.getValue(Constants.CONNECTION);
@@ -1237,6 +1245,14 @@ public class Http11Processor extends AbstractProcessor {
                 }
             }
         }
+    }
+
+
+    @Override
+    protected void earlyHints() throws IOException {
+        writeHeaders(HttpServletResponse.SC_EARLY_HINTS, response.getMimeHeaders());
+        outputBuffer.writeHeaders();
+        outputBuffer.resetHeaderBuffer();
     }
 
 
