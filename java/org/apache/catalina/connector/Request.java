@@ -65,7 +65,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import jakarta.servlet.http.HttpUpgradeHandler;
 import jakarta.servlet.http.Part;
-import jakarta.servlet.http.PushBuilder;
 
 import org.apache.catalina.Container;
 import org.apache.catalina.Context;
@@ -79,7 +78,6 @@ import org.apache.catalina.Wrapper;
 import org.apache.catalina.core.ApplicationFilterChain;
 import org.apache.catalina.core.ApplicationMapping;
 import org.apache.catalina.core.ApplicationPart;
-import org.apache.catalina.core.ApplicationPushBuilder;
 import org.apache.catalina.core.ApplicationSessionCookieConfig;
 import org.apache.catalina.core.AsyncContextImpl;
 import org.apache.catalina.mapper.MappingData;
@@ -88,6 +86,7 @@ import org.apache.catalina.util.RequestUtil;
 import org.apache.catalina.util.TLSUtil;
 import org.apache.catalina.util.URLEncoder;
 import org.apache.coyote.ActionCode;
+import org.apache.coyote.BadRequestException;
 import org.apache.coyote.UpgradeToken;
 import org.apache.coyote.http11.upgrade.InternalHttpUpgradeHandler;
 import org.apache.juli.logging.Log;
@@ -115,6 +114,7 @@ import org.apache.tomcat.util.http.fileupload.impl.InvalidContentTypeException;
 import org.apache.tomcat.util.http.fileupload.impl.SizeException;
 import org.apache.tomcat.util.http.fileupload.servlet.ServletRequestContext;
 import org.apache.tomcat.util.http.parser.AcceptLanguage;
+import org.apache.tomcat.util.http.parser.MediaType;
 import org.apache.tomcat.util.http.parser.Upgrade;
 import org.apache.tomcat.util.net.SSLSupport;
 import org.apache.tomcat.util.res.StringManager;
@@ -145,6 +145,9 @@ public class Request implements HttpServletRequest {
      */
     public Request(Connector connector, org.apache.coyote.Request coyoteRequest) {
         this.connector = connector;
+        if (connector != null) {
+            this.maxParameterCount = connector.getMaxParameterCount();
+        }
         this.coyoteRequest = coyoteRequest;
         inputBuffer = new InputBuffer(coyoteRequest);
     }
@@ -411,6 +414,10 @@ public class Request implements HttpServletRequest {
 
     private HttpServletRequest applicationRequest = null;
 
+    /**
+     * The maximum number of request parameters
+     */
+    private int maxParameterCount = -1;
 
     // --------------------------------------------------------- Public Methods
 
@@ -441,12 +448,18 @@ public class Request implements HttpServletRequest {
         userPrincipal = null;
         subject = null;
         parametersParsed = false;
+        if (connector != null) {
+            maxParameterCount = connector.getMaxParameterCount();
+        } else {
+            maxParameterCount = -1;
+        }
         if (parts != null) {
             for (Part part : parts) {
                 try {
                     part.delete();
-                } catch (IOException ignored) {
-                    // ApplicationPart.delete() never throws an IOEx
+                } catch (Throwable t) {
+                    ExceptionUtils.handleThrowable(t);
+                    log.warn(sm.getString("coyoteRequest.deletePartFailed", part.getName()), t);
                 }
             }
             parts = null;
@@ -500,8 +513,8 @@ public class Request implements HttpServletRequest {
         asyncSupported = null;
         if (asyncContext != null) {
             asyncContext.recycle();
+            asyncContext = null;
         }
-        asyncContext = null;
     }
 
 
@@ -660,12 +673,12 @@ public class Request implements HttpServletRequest {
     /**
      * The response with which this request is associated.
      */
-    protected org.apache.catalina.connector.Response response = null;
+    protected Response response = null;
 
     /**
      * @return the Response with which this Request is associated.
      */
-    public org.apache.catalina.connector.Response getResponse() {
+    public Response getResponse() {
         return this.response;
     }
 
@@ -674,7 +687,7 @@ public class Request implements HttpServletRequest {
      *
      * @param response The new associated response
      */
-    public void setResponse(org.apache.catalina.connector.Response response) {
+    public void setResponse(Response response) {
         this.response = response;
     }
 
@@ -828,14 +841,18 @@ public class Request implements HttpServletRequest {
         coyoteRequest.setServerPort(port);
     }
 
+    /**
+     * Set the maximum number of request parameters (GET plus POST) for a single request
+     *
+     * @param maxParameterCount The maximum number of request parameters
+     */
+    public void setMaxParameterCount(int maxParameterCount) {
+        this.maxParameterCount = maxParameterCount;
+    }
 
     // ------------------------------------------------- ServletRequest Methods
 
-    /**
-     * @return the specified request attribute if it exists; otherwise, return <code>null</code>.
-     *
-     * @param name Name of the request attribute to return
-     */
+    @SuppressWarnings("deprecation")
     @Override
     public Object getAttribute(String name) {
         // Special attributes
@@ -860,6 +877,11 @@ public class Request implements HttpServletRequest {
             if (attr != null) {
                 attributes.put(Globals.CERTIFICATES_ATTR, attr);
             }
+            attr = coyoteRequest.getAttribute(Globals.SECURE_PROTOCOL_ATTR);
+            if (attr != null) {
+                attributes.put(Globals.SECURE_PROTOCOL_ATTR, attr);
+                attributes.put(SSLSupport.PROTOCOL_VERSION_KEY, attr);
+            }
             attr = coyoteRequest.getAttribute(Globals.CIPHER_SUITE_ATTR);
             if (attr != null) {
                 attributes.put(Globals.CIPHER_SUITE_ATTR, attr);
@@ -875,10 +897,6 @@ public class Request implements HttpServletRequest {
             attr = coyoteRequest.getAttribute(Globals.SSL_SESSION_MGR_ATTR);
             if (attr != null) {
                 attributes.put(Globals.SSL_SESSION_MGR_ATTR, attr);
-            }
-            attr = coyoteRequest.getAttribute(SSLSupport.PROTOCOL_VERSION_KEY);
-            if (attr != null) {
-                attributes.put(SSLSupport.PROTOCOL_VERSION_KEY, attr);
             }
             attr = coyoteRequest.getAttribute(SSLSupport.REQUESTED_PROTOCOL_VERSIONS_KEY);
             if (attr != null) {
@@ -902,15 +920,17 @@ public class Request implements HttpServletRequest {
 
 
     /**
-     * Return the names of all request attributes for this Request, or an empty <code>Enumeration</code> if there are
-     * none. Note that the attribute names returned will only be those for the attributes set via
-     * {@link #setAttribute(String, Object)}. Tomcat internal attributes will not be included although they are
-     * accessible via {@link #getAttribute(String)}. The Tomcat internal attributes include:
+     * {@inheritDoc}
+     * <p>
+     * The attribute names returned will only be those for the attributes set via {@link #setAttribute(String, Object)}.
+     * Tomcat internal attributes will not be included although they are accessible via {@link #getAttribute(String)}.
+     * The Tomcat internal attributes include:
      * <ul>
      * <li>{@link Globals#DISPATCHER_TYPE_ATTR}</li>
      * <li>{@link Globals#DISPATCHER_REQUEST_PATH_ATTR}</li>
      * <li>{@link Globals#ASYNC_SUPPORTED_ATTR}</li>
      * <li>{@link Globals#CERTIFICATES_ATTR} (SSL connections only)</li>
+     * <li>{@link Globals#SECURE_PROTOCOL_ATTR} (SSL connections only)</li>
      * <li>{@link Globals#CIPHER_SUITE_ATTR} (SSL connections only)</li>
      * <li>{@link Globals#KEY_SIZE_ATTR} (SSL connections only)</li>
      * <li>{@link Globals#SSL_SESSION_ID_ATTR} (SSL connections only)</li>
@@ -923,8 +943,6 @@ public class Request implements HttpServletRequest {
      * </ul>
      * Connector implementations may return some, all or none of these attributes and may also support additional
      * attributes.
-     *
-     * @return the attribute names enumeration
      */
     @Override
     public Enumeration<String> getAttributeNames() {
@@ -938,9 +956,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the character encoding for this Request.
-     */
     @Override
     public String getCharacterEncoding() {
         String characterEncoding = coyoteRequest.getCharsetHolder().getName();
@@ -974,18 +989,12 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the content length for this Request.
-     */
     @Override
     public int getContentLength() {
         return coyoteRequest.getContentLength();
     }
 
 
-    /**
-     * @return the content type for this Request.
-     */
     @Override
     public String getContentType() {
         return coyoteRequest.getContentType();
@@ -1002,13 +1011,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the servlet input stream for this Request. The default implementation returns a servlet input stream
-     *             created by <code>createInputStream()</code>.
-     *
-     * @exception IllegalStateException if <code>getReader()</code> has already been called for this request
-     * @exception IOException           if an input/output error occurs
-     */
     @Override
     public ServletInputStream getInputStream() throws IOException {
 
@@ -1025,11 +1027,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the preferred Locale that the client will accept content in, based on the value for the first
-     *             <code>Accept-Language</code> header that was encountered. If the request did not specify a preferred
-     *             language, the server's default Locale is returned.
-     */
     @Override
     public Locale getLocale() {
 
@@ -1045,11 +1042,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the set of preferred Locales that the client will accept content in, based on the values for any
-     *             <code>Accept-Language</code> headers that were encountered. If the request did not specify a
-     *             preferred language, the server's default Locale is returned.
-     */
     @Override
     public Enumeration<Locale> getLocales() {
 
@@ -1108,24 +1100,12 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the protocol and version used to make this Request.
-     */
     @Override
     public String getProtocol() {
-        return coyoteRequest.protocol().toString();
+        return coyoteRequest.protocol().toStringType();
     }
 
 
-    /**
-     * Read the Reader wrapping the input stream for this Request. The default implementation wraps a
-     * <code>BufferedReader</code> around the servlet input stream returned by <code>createInputStream()</code>.
-     *
-     * @return a buffered reader for the request
-     *
-     * @exception IllegalStateException if <code>getInputStream()</code> has already been called for this request
-     * @exception IOException           if an input/output error occurs
-     */
     @Override
     public BufferedReader getReader() throws IOException {
 
@@ -1161,9 +1141,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the remote IP address making this Request.
-     */
     @Override
     public String getRemoteAddr() {
         if (remoteAddr == null) {
@@ -1186,9 +1163,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the remote host name making this Request.
-     */
     @Override
     public String getRemoteHost() {
         if (remoteHost == null) {
@@ -1202,9 +1176,6 @@ public class Request implements HttpServletRequest {
         return remoteHost;
     }
 
-    /**
-     * @return the Internet Protocol (IP) source port of the client or last proxy that sent the request.
-     */
     @Override
     public int getRemotePort() {
         if (remotePort == -1) {
@@ -1214,9 +1185,6 @@ public class Request implements HttpServletRequest {
         return remotePort;
     }
 
-    /**
-     * @return the host name of the Internet Protocol (IP) interface on which the request was received.
-     */
     @Override
     public String getLocalName() {
         if (localName == null) {
@@ -1226,9 +1194,6 @@ public class Request implements HttpServletRequest {
         return localName;
     }
 
-    /**
-     * @return the Internet Protocol (IP) address of the interface on which the request was received.
-     */
     @Override
     public String getLocalAddr() {
         if (localAddr == null) {
@@ -1239,9 +1204,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the Internet Protocol (IP) port number of the interface on which the request was received.
-     */
     @Override
     public int getLocalPort() {
         if (localPort == -1) {
@@ -1251,12 +1213,6 @@ public class Request implements HttpServletRequest {
         return localPort;
     }
 
-    /**
-     * @return a RequestDispatcher that wraps the resource at the specified path, which may be interpreted as relative
-     *             to the current request path.
-     *
-     * @param path Path of the resource to be wrapped
-     */
     @Override
     public RequestDispatcher getRequestDispatcher(String path) {
 
@@ -1330,47 +1286,30 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the scheme used to make this Request.
-     */
     @Override
     public String getScheme() {
-        return coyoteRequest.scheme().toString();
+        return coyoteRequest.scheme().toStringType();
     }
 
 
-    /**
-     * @return the server name responding to this Request.
-     */
     @Override
     public String getServerName() {
         return coyoteRequest.serverName().toString();
     }
 
 
-    /**
-     * @return the server port responding to this Request.
-     */
     @Override
     public int getServerPort() {
         return coyoteRequest.getServerPort();
     }
 
 
-    /**
-     * @return <code>true</code> if this request was received on a secure connection.
-     */
     @Override
     public boolean isSecure() {
         return secure;
     }
 
 
-    /**
-     * Remove the specified request attribute if it exists.
-     *
-     * @param name Name of the request attribute to remove
-     */
     @Override
     public void removeAttribute(String name) {
         // Remove the specified attribute
@@ -1390,12 +1329,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Set the specified request attribute to the specified value.
-     *
-     * @param name  Name of the request attribute to set
-     * @param value The associated value
-     */
     @Override
     public void setAttribute(String name, Object value) {
 
@@ -1506,16 +1439,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Overrides the name of the character encoding used in the body of this request. This method must be called prior
-     * to reading request parameters or reading input using <code>getReader()</code>.
-     *
-     * @param enc The character encoding to be used
-     *
-     * @exception UnsupportedEncodingException if the specified encoding is not supported
-     *
-     * @since Servlet 2.3
-     */
     @Override
     public void setCharacterEncoding(String enc) throws UnsupportedEncodingException {
 
@@ -1861,32 +1784,15 @@ public class Request implements HttpServletRequest {
         if (!isTrailerFieldsReady()) {
             throw new IllegalStateException(sm.getString("coyoteRequest.trailersNotReady"));
         }
-        Map<String,String> result = new HashMap<>(coyoteRequest.getTrailerFields());
-        return result;
-    }
-
-
-    @Override
-    public PushBuilder newPushBuilder() {
-        return newPushBuilder(this);
-    }
-
-
-    public PushBuilder newPushBuilder(HttpServletRequest request) {
-        AtomicBoolean result = new AtomicBoolean();
-        coyoteRequest.action(ActionCode.IS_PUSH_SUPPORTED, result);
-        if (result.get()) {
-            return new ApplicationPushBuilder(this, request);
-        } else {
-            return null;
-        }
+        // No need for a defensive copy since a new Map is returned for every call.
+        return coyoteRequest.getTrailerFields();
     }
 
 
     @SuppressWarnings("unchecked")
     @Override
     public <T extends HttpUpgradeHandler> T upgrade(Class<T> httpUpgradeHandlerClass)
-            throws java.io.IOException, ServletException {
+            throws IOException, ServletException {
         T handler;
         InstanceManager instanceManager = null;
         try {
@@ -1936,19 +1842,12 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Return the authentication type used for this Request.
-     */
     @Override
     public String getAuthType() {
         return authType;
     }
 
 
-    /**
-     * Return the portion of the request URI used to select the Context of the Request. The value returned is not
-     * decoded which also implies it is not normalised.
-     */
     @Override
     public String getContextPath() {
         int lastSlash = mappingData.contextSlashCount;
@@ -2064,12 +1963,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Return the set of Cookies received with this Request. Triggers parsing of the Cookie HTTP headers followed by
-     * conversion to Cookie objects if this has not already been performed.
-     *
-     * @return the array of cookies
-     */
     @Override
     public Cookie[] getCookies() {
         if (!cookiesConverted) {
@@ -2091,15 +1984,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Return the value of the specified date header, if any; otherwise return -1.
-     *
-     * @param name Name of the requested date header
-     *
-     * @return the date as a long
-     *
-     * @exception IllegalArgumentException if the specified header value cannot be converted to a date
-     */
     @Override
     public long getDateHeader(String name) {
 
@@ -2118,50 +2002,24 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * Return the first value of the specified header, if any; otherwise, return <code>null</code>
-     *
-     * @param name Name of the requested header
-     *
-     * @return the header value
-     */
     @Override
     public String getHeader(String name) {
         return coyoteRequest.getHeader(name);
     }
 
 
-    /**
-     * Return all of the values of the specified header, if any; otherwise, return an empty enumeration.
-     *
-     * @param name Name of the requested header
-     *
-     * @return the enumeration with the header values
-     */
     @Override
     public Enumeration<String> getHeaders(String name) {
         return coyoteRequest.getMimeHeaders().values(name);
     }
 
 
-    /**
-     * @return the names of all headers received with this request.
-     */
     @Override
     public Enumeration<String> getHeaderNames() {
         return coyoteRequest.getMimeHeaders().names();
     }
 
 
-    /**
-     * Return the value of the specified header as an integer, or -1 if there is no such header for this request.
-     *
-     * @param name Name of the requested header
-     *
-     * @return the header value as an int
-     *
-     * @exception IllegalArgumentException if the specified header value cannot be converted to an integer
-     */
     @Override
     public int getIntHeader(String name) {
 
@@ -2180,27 +2038,18 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the HTTP request method used in this Request.
-     */
     @Override
     public String getMethod() {
-        return coyoteRequest.method().toString();
+        return coyoteRequest.method().toStringType();
     }
 
 
-    /**
-     * @return the path information associated with this Request.
-     */
     @Override
     public String getPathInfo() {
-        return mappingData.pathInfo.toString();
+        return mappingData.pathInfo.toStringType();
     }
 
 
-    /**
-     * @return the extra path information for this request, translated to a real path.
-     */
     @Override
     public String getPathTranslated() {
 
@@ -2217,18 +2066,12 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the query string associated with this request.
-     */
     @Override
     public String getQueryString() {
         return coyoteRequest.queryString().toString();
     }
 
 
-    /**
-     * @return the name of the remote user that has been authenticated for this Request.
-     */
     @Override
     public String getRemoteUser() {
 
@@ -2250,21 +2093,15 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the session identifier included in this request, if any.
-     */
     @Override
     public String getRequestedSessionId() {
         return requestedSessionId;
     }
 
 
-    /**
-     * @return the request URI for this request.
-     */
     @Override
     public String getRequestURI() {
-        return coyoteRequest.requestURI().toString();
+        return coyoteRequest.requestURI().toStringType();
     }
 
 
@@ -2274,29 +2111,18 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the portion of the request URI used to select the servlet that will process this request.
-     */
     @Override
     public String getServletPath() {
-        return mappingData.wrapperPath.toString();
+        return mappingData.wrapperPath.toStringType();
     }
 
 
-    /**
-     * @return the session associated with this Request, creating one if necessary.
-     */
     @Override
     public HttpSession getSession() {
         return getSession(true);
     }
 
 
-    /**
-     * @return the session associated with this Request, creating one if necessary and requested.
-     *
-     * @param create Create a new session if one does not exist
-     */
     @Override
     public HttpSession getSession(boolean create) {
         Session session = doGetSession(create);
@@ -2308,9 +2134,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return <code>true</code> if the session identifier included in this request came from a cookie.
-     */
     @Override
     public boolean isRequestedSessionIdFromCookie() {
 
@@ -2322,9 +2145,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return <code>true</code> if the session identifier included in this request came from the request URI.
-     */
     @Override
     public boolean isRequestedSessionIdFromURL() {
 
@@ -2336,9 +2156,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return <code>true</code> if the session identifier included in this request identifies a valid session.
-     */
     @Override
     public boolean isRequestedSessionIdValid() {
 
@@ -2395,11 +2212,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return <code>true</code> if the authenticated user principal possesses the specified role name.
-     *
-     * @param role Role name to be validated
-     */
     @Override
     public boolean isUserInRole(String role) {
 
@@ -2444,9 +2256,6 @@ public class Request implements HttpServletRequest {
     }
 
 
-    /**
-     * @return the principal that has been authenticated for this Request.
-     */
     @Override
     public Principal getUserPrincipal() {
         if (userPrincipal instanceof TomcatPrincipal) {
@@ -2640,7 +2449,6 @@ public class Request implements HttpServletRequest {
             }
         }
 
-        int maxParameterCount = getConnector().getMaxParameterCount();
         Parameters parameters = coyoteRequest.getParameters();
         parameters.setLimit(maxParameterCount);
 
@@ -2979,8 +2787,6 @@ public class Request implements HttpServletRequest {
 
         Parameters parameters = coyoteRequest.getParameters();
 
-        // Set this every time in case limit has been changed via JMX
-        int maxParameterCount = getConnector().getMaxParameterCount();
         if (parts != null && maxParameterCount > 0) {
             maxParameterCount -= parts.size();
         }
@@ -3004,18 +2810,9 @@ public class Request implements HttpServletRequest {
             return;
         }
 
-        String contentType = getContentType();
-        if (contentType == null) {
-            contentType = "";
-        }
-        int semicolon = contentType.indexOf(';');
-        if (semicolon >= 0) {
-            contentType = contentType.substring(0, semicolon).trim();
-        } else {
-            contentType = contentType.trim();
-        }
+        String mediaType = MediaType.parseMediaTypeOnly(getContentType());
 
-        if ("multipart/form-data".equals(contentType)) {
+        if ("multipart/form-data".equals(mediaType)) {
             parseParts();
             if (partsParseException instanceof IllegalStateException) {
                 parametersParseException = (IllegalStateException) partsParseException;
@@ -3029,7 +2826,7 @@ public class Request implements HttpServletRequest {
             return;
         }
 
-        if (!("application/x-www-form-urlencoded".equals(contentType))) {
+        if (!(Globals.CONTENT_TYPE_FORM_URL_ENCODING.equals(mediaType))) {
             return;
         }
 
@@ -3060,16 +2857,18 @@ public class Request implements HttpServletRequest {
             try {
                 readPostBodyFully(formData, len);
             } catch (IOException e) {
-                // Client disconnect
                 Context context = getContext();
                 if (context != null && context.getLogger().isDebugEnabled()) {
                     context.getLogger().debug(sm.getString("coyoteRequest.parseParameters"), e);
                 }
-                response.getCoyoteResponse().action(ActionCode.CLOSE_NOW, null);
                 if (e instanceof ClientAbortException) {
+                    // Client has disconnected. Close immediately.
+                    response.getCoyoteResponse().action(ActionCode.CLOSE_NOW, null);
+                }
+                if (e instanceof BadRequestException) {
                     parametersParseException = new InvalidParameterException(e);
                 } else {
-                    parametersParseException = new InvalidParameterException(new ClientAbortException(e));
+                    parametersParseException = new InvalidParameterException(new BadRequestException(e));
                 }
                 return;
             }
@@ -3082,16 +2881,18 @@ public class Request implements HttpServletRequest {
                 parametersParseException = ise;
                 return;
             } catch (IOException e) {
-                // Client disconnect
                 Context context = getContext();
                 if (context != null && context.getLogger().isDebugEnabled()) {
                     context.getLogger().debug(sm.getString("coyoteRequest.parseParameters"), e);
                 }
-                response.getCoyoteResponse().action(ActionCode.CLOSE_NOW, null);
                 if (e instanceof ClientAbortException) {
+                    // Client has disconnected. Close immediately.
+                    response.getCoyoteResponse().action(ActionCode.CLOSE_NOW, null);
+                }
+                if (e instanceof BadRequestException) {
                     parametersParseException = new InvalidParameterException(e);
                 } else {
-                    parametersParseException = new InvalidParameterException(new ClientAbortException(e));
+                    parametersParseException = new InvalidParameterException(new BadRequestException(e));
                 }
                 return;
             }

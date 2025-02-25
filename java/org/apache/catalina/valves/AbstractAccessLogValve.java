@@ -115,6 +115,8 @@ import org.apache.tomcat.util.net.IPv6Utils;
  * <li><code>%{xxx}s</code> xxx is an attribute in the HttpSession
  * <li><code>%{xxx}t</code> xxx is an enhanced SimpleDateFormat pattern (see Configuration Reference document for
  * details on supported time patterns)
+ * <li><code>%{xxx}L</code> xxx is the identifier to log (see Configuration Reference document for details on supported
+ * identifiers)
  * <li><code>%{xxx}T</code> xxx is the unit for the time taken to process the request (see Configuration Reference
  * document for details on supported units)
  * </ul>
@@ -167,7 +169,12 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
         PEER
     }
 
-    // ------------------------------------------------------ Constructor
+    private enum IdentifierType {
+        CONNECTION,
+        UNKNOWN
+    }
+
+
     public AbstractAccessLogValve() {
         super(true);
     }
@@ -362,7 +369,7 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
         private final Locale cacheDefaultLocale;
         private final DateFormatCache parent;
         protected final Cache cLFCache;
-        private final Map<String, Cache> formatCache = new HashMap<>();
+        private final Map<String,Cache> formatCache = new HashMap<>();
 
         protected DateFormatCache(int size, Locale loc, DateFormatCache parent) {
             cacheSize = size;
@@ -409,14 +416,14 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
     /**
      * Global date format cache.
      */
-    private static final DateFormatCache globalDateCache = new DateFormatCache(globalCacheSize, Locale.getDefault(),
-            null);
+    private static final DateFormatCache globalDateCache =
+            new DateFormatCache(globalCacheSize, Locale.getDefault(), null);
 
     /**
      * Thread local date format cache.
      */
-    private static final ThreadLocal<DateFormatCache> localDateCache = ThreadLocal
-            .withInitial(() -> new DateFormatCache(localCacheSize, Locale.getDefault(), globalDateCache));
+    private static final ThreadLocal<DateFormatCache> localDateCache =
+            ThreadLocal.withInitial(() -> new DateFormatCache(localCacheSize, Locale.getDefault(), globalDateCache));
 
 
     /**
@@ -645,16 +652,6 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
 
     // --------------------------------------------------------- Public Methods
 
-    /**
-     * Log a message summarizing the specified request and response, according to the format specified by the
-     * <code>pattern</code> property.
-     *
-     * @param request  Request being processed
-     * @param response Response being processed
-     *
-     * @exception IOException      if an input/output error has occurred
-     * @exception ServletException if a servlet error has occurred
-     */
     @Override
     public void invoke(Request request, Response response) throws IOException, ServletException {
         if (tlsAttributeRequired) {
@@ -1307,8 +1304,64 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
      * write time taken to process the request - %D, %T
      */
     protected static class ElapsedTimeElement implements AccessLogElement {
-        private final boolean micros;
-        private final boolean millis;
+        enum Style {
+            SECONDS {
+                @Override
+                public void append(CharArrayWriter buf, long time) {
+                    buf.append(Long.toString(TimeUnit.NANOSECONDS.toSeconds(time)));
+                }
+            },
+            SECONDS_FRACTIONAL {
+                @Override
+                public void append(CharArrayWriter buf, long time) {
+                    time = time / 1000000; // Convert to millis
+                    buf.append(Long.toString(time / 1000));
+                    buf.append('.');
+                    int remains = (int) (time % 1000);
+                    buf.append(Long.toString(remains / 100));
+                    remains = remains % 100;
+                    buf.append(Long.toString(remains / 10));
+                    buf.append(Long.toString(remains % 10));
+                }
+            },
+            MILLISECONDS {
+                @Override
+                public void append(CharArrayWriter buf, long time) {
+                    buf.append(Long.toString(TimeUnit.NANOSECONDS.toMillis(time)));
+                }
+            },
+            MICROSECONDS {
+                @Override
+                public void append(CharArrayWriter buf, long time) {
+                    buf.append(Long.toString(TimeUnit.NANOSECONDS.toMicros(time)));
+                }
+            },
+            NANOSECONDS {
+                @Override
+                public void append(CharArrayWriter buf, long time) {
+                    buf.append(Long.toString(time));
+                }
+            };
+
+            /**
+             * Append the time to the buffer in the appropriate format.
+             *
+             * @param buf  The buffer to append to.
+             * @param time The time to log in nanoseconds.
+             */
+            public abstract void append(CharArrayWriter buf, long time);
+        }
+
+        private final Style style;
+
+        /**
+         * Creates a new ElapsedTimeElement that will log the time in the specified style.
+         *
+         * @param style The elapsed-time style to use.
+         */
+        public ElapsedTimeElement(Style style) {
+            this.style = style;
+        }
 
         /**
          * @param micros <code>true</code>, write time in microseconds - %D
@@ -1316,20 +1369,12 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
          *                   time in seconds - %T
          */
         public ElapsedTimeElement(boolean micros, boolean millis) {
-            this.micros = micros;
-            this.millis = millis;
+            this(micros ? Style.MICROSECONDS : millis ? Style.MILLISECONDS : Style.SECONDS);
         }
 
         @Override
         public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
-            if (micros) {
-                buf.append(Long.toString(TimeUnit.NANOSECONDS.toMicros(time)));
-            } else if (millis) {
-                buf.append(Long.toString(TimeUnit.NANOSECONDS.toMillis(time)));
-            } else {
-                // second
-                buf.append(Long.toString(TimeUnit.NANOSECONDS.toSeconds(time)));
-            }
+            style.append(buf, time);
         }
     }
 
@@ -1479,12 +1524,15 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
 
         @Override
         public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
-            StringBuilder value = new StringBuilder();
+            StringBuilder value = null;
             boolean first = true;
             Cookie[] cookies = request.getCookies();
             if (cookies != null) {
                 for (Cookie cookie : cookies) {
                     if (cookieNameToLog.equals(cookie.getName())) {
+                        if (value == null) {
+                            value = new StringBuilder();
+                        }
                         if (first) {
                             first = false;
                         } else {
@@ -1494,7 +1542,7 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
                     }
                 }
             }
-            if (value.length() == 0) {
+            if (value == null) {
                 buf.append('-');
             } else {
                 escapeAndAppend(value.toString(), buf);
@@ -1634,6 +1682,48 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
         }
     }
 
+
+
+    /**
+     * Write identifier element %{xxx}L
+     */
+    protected class IdentifierElement implements AccessLogElement {
+
+        /**
+         * Type of identifier to log
+         */
+        private final IdentifierType identifierType;
+
+        public IdentifierElement() {
+            this(null);
+        }
+
+
+        public IdentifierElement(String type) {
+            switch (type) {
+                case "c":
+                    identifierType = IdentifierType.CONNECTION;
+                    break;
+                default:
+                    log.error(sm.getString("accessLogValve.invalidIdentifierType", type));
+                    identifierType = IdentifierType.UNKNOWN;
+                    break;
+            }
+        }
+
+        @Override
+        public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
+            switch(identifierType) {
+                case CONNECTION:
+                    buf.append(request.getServletConnection().getConnectionId());
+                    break;
+                case UNKNOWN:
+                    buf.append("???");
+            }
+        }
+    }
+
+
     /**
      * Parse pattern string and create the array of AccessLogElement.
      *
@@ -1706,14 +1796,16 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
      */
     protected AccessLogElement createAccessLogElement(String name, char pattern) {
         switch (pattern) {
-            case 'i':
-                return new HeaderElement(name);
-            case 'c':
-                return new CookieElement(name);
-            case 'o':
-                return new ResponseHeaderElement(name);
             case 'a':
                 return new RemoteAddrElement(name);
+            case 'c':
+                return new CookieElement(name);
+            case 'i':
+                return new HeaderElement(name);
+            case 'L':
+                return new IdentifierElement(name);
+            case 'o':
+                return new ResponseHeaderElement(name);
             case 'p':
                 return new PortElement(name);
             case 'r':
@@ -1727,10 +1819,14 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
                 return new DateAndTimeElement(name);
             case 'T':
                 // ms for milliseconds, us for microseconds, and s for seconds
-                if ("ms".equals(name)) {
-                    return new ElapsedTimeElement(false, true);
+                if ("ns".equals(name)) {
+                    return new ElapsedTimeElement(ElapsedTimeElement.Style.NANOSECONDS);
                 } else if ("us".equals(name)) {
-                    return new ElapsedTimeElement(true, false);
+                    return new ElapsedTimeElement(ElapsedTimeElement.Style.MICROSECONDS);
+                } else if ("ms".equals(name)) {
+                    return new ElapsedTimeElement(ElapsedTimeElement.Style.MILLISECONDS);
+                } else if ("fracsec".equals(name)) {
+                    return new ElapsedTimeElement(ElapsedTimeElement.Style.SECONDS_FRACTIONAL);
                 } else {
                     return new ElapsedTimeElement(false, false);
                 }
@@ -1870,7 +1966,7 @@ public abstract class AbstractAccessLogValve extends ValveBase implements Access
                     // is encountered plus at the end.
                     default:
                 }
-            // Control (1-31), delete (127) or above 127
+                // Control (1-31), delete (127) or above 127
             } else {
                 // Write unchanged string parts
                 if (current > next) {

@@ -59,7 +59,7 @@ public class TestServletRequestParametersMultipartEncoded extends ServletRequest
         tomcat.getConnector().setMaxPostSize(50);
 
         // No file system docBase required
-        StandardContext ctx = (StandardContext) tomcat.addContext("", null);
+        StandardContext ctx = (StandardContext) getProgrammaticRootContext();
         ctx.setAllowCasualMultipartParsing(true);
 
         // Map the test Servlet
@@ -99,7 +99,8 @@ public class TestServletRequestParametersMultipartEncoded extends ServletRequest
                     CRLF +
                     "0a" + CRLF +
                     "--AaBbCc--" + CRLF +
-                    "0" + CRLF});
+                    "0" + CRLF +
+                    CRLF});
         } else {
             client.setRequest(new String[] {
                     "POST / HTTP/1.1" + CRLF +

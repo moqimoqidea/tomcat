@@ -15,11 +15,12 @@
   See the License for the specific language governing permissions and
   limitations under the License.
 --%>
-<%@page session="false" contentType="text/html; charset=ISO-8859-1" %>
+<%@page session="false" contentType="text/html; charset=UTF-8" %>
 <%@page import="java.util.Collection" %>
-<%@page import="org.apache.catalina.manager.JspHelper" %>
 <%@page import="org.apache.catalina.Session" %>
 <%@page import="org.apache.catalina.ha.session.DeltaSession" %>
+<%@page import="org.apache.catalina.manager.Constants" %>
+<%@page import="org.apache.catalina.manager.JspHelper" %>
 <%@page import="org.apache.catalina.util.ContextName" %>
 <!DOCTYPE html
      PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
@@ -36,13 +37,13 @@
    Collection<Session> activeSessions = (Collection<Session>) request.getAttribute("activeSessions");
 %>
 <head>
-    <meta http-equiv="content-type" content="text/html; charset=iso-8859-1"/>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8"/>
     <meta http-equiv="pragma" content="no-cache"/><!-- HTTP 1.0 -->
     <meta http-equiv="cache-control" content="no-cache,must-revalidate"/><!-- HTTP 1.1 -->
     <meta http-equiv="expires" content="0"/><!-- 0 is an invalid value and should be treated as 'now' -->
     <meta http-equiv="content-language" content="en"/>
     <meta name="author" content="Cedrik LIME"/>
-    <meta name="copyright" content="copyright 2005-2023 the Apache Software Foundation"/>
+    <meta name="copyright" content="<%= Constants.COPYRIGHT_NOTICE %>" />
     <meta name="robots" content="noindex,nofollow,noarchive"/>
     <title>Sessions Administration for <%= JspHelper.escapeXml(cn.getDisplayName()) %></title>
 </head>

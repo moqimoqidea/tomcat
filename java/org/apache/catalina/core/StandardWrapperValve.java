@@ -31,10 +31,10 @@ import org.apache.catalina.Container;
 import org.apache.catalina.Context;
 import org.apache.catalina.Globals;
 import org.apache.catalina.LifecycleException;
-import org.apache.catalina.connector.ClientAbortException;
 import org.apache.catalina.connector.Request;
 import org.apache.catalina.connector.Response;
 import org.apache.catalina.valves.ValveBase;
+import org.apache.coyote.BadRequestException;
 import org.apache.coyote.CloseNowException;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.buf.MessageBytes;
@@ -169,7 +169,14 @@ final class StandardWrapperValve extends ValveBase {
                 }
 
             }
-        } catch (ClientAbortException | CloseNowException e) {
+        } catch (BadRequestException e) {
+            if (container.getLogger().isDebugEnabled()) {
+                container.getLogger().debug(
+                        sm.getString("standardWrapper.serviceException", wrapper.getName(), context.getName()), e);
+            }
+            throwable = e;
+            exception(request, response, e, HttpServletResponse.SC_BAD_REQUEST);
+        } catch (CloseNowException e) {
             if (container.getLogger().isDebugEnabled()) {
                 container.getLogger().debug(
                         sm.getString("standardWrapper.serviceException", wrapper.getName(), context.getName()), e);
@@ -190,7 +197,7 @@ final class StandardWrapperValve extends ValveBase {
             // do not want to do exception(request, response, e) processing
         } catch (ServletException e) {
             Throwable rootCause = StandardWrapper.getRootCause(e);
-            if (!(rootCause instanceof ClientAbortException)) {
+            if (!(rootCause instanceof BadRequestException)) {
                 container.getLogger().error(sm.getString("standardWrapper.serviceExceptionRoot", wrapper.getName(),
                         context.getName(), e.getMessage()), rootCause);
             }
@@ -279,7 +286,11 @@ final class StandardWrapperValve extends ValveBase {
      * @param exception The exception that occurred (which possibly wraps a root cause exception
      */
     private void exception(Request request, Response response, Throwable exception) {
-        exception(request, response, exception, HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        if (exception.getCause() instanceof InvalidParameterException) {
+            exception(request, response, exception, ((InvalidParameterException) exception.getCause()).getErrorCode());
+        } else {
+            exception(request, response, exception, HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
     }
 
     private void exception(Request request, Response response, Throwable exception, int errorCode) {

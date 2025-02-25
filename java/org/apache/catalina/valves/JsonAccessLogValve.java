@@ -32,7 +32,9 @@ import org.apache.tomcat.util.json.JSONFilter;
 
 /**
  * Access log valve derivative that rewrites entries as JSON.
- * <b>Important note: the attribute names are not final</b>
+ * <p>
+ * <b>Important note: the attribute names are not final.</b>
+ * <p>
  * Patterns are mapped to attributes as followed:
  * <ul>
  * <li>a: remoteAddr</li>
@@ -65,16 +67,15 @@ import org.apache.tomcat.util.json.JSONFilter;
  * <li>%{xxx}o: responseHeaders</li>
  * <li>%{xxx}r: requestAttributes</li>
  * <li>%{xxx}s: sessionAttributes</li>
+ * <li>%{xxx}L: identifier</li>
  * </ul>
- * The attribute list is based on
- * https://github.com/fluent/fluentd/blob/master/lib/fluent/plugin/parser_apache2.rb#L72
+ * The attribute list is based on https://github.com/fluent/fluentd/blob/master/lib/fluent/plugin/parser_apache2.rb#L72
  */
 public class JsonAccessLogValve extends AccessLogValve {
 
-    private static final Map<Character, String> PATTERNS;
+    private static final Map<Character,String> PATTERNS;
     static {
-        // FIXME: finalize attribute names
-        Map<Character, String> pattern2AttributeName = new HashMap<>();
+        Map<Character,String> pattern2AttributeName = new HashMap<>();
         pattern2AttributeName.put(Character.valueOf('a'), "remoteAddr");
         pattern2AttributeName.put(Character.valueOf('A'), "localAddr");
         pattern2AttributeName.put(Character.valueOf('b'), "size");
@@ -100,15 +101,15 @@ public class JsonAccessLogValve extends AccessLogValve {
         PATTERNS = Collections.unmodifiableMap(pattern2AttributeName);
     }
 
-    private static final Map<Character, String> SUB_OBJECT_PATTERNS;
+    private static final Map<Character,String> SUB_OBJECT_PATTERNS;
     static {
-        // FIXME: finalize attribute names
-        Map<Character, String> pattern2AttributeName = new HashMap<>();
+        Map<Character,String> pattern2AttributeName = new HashMap<>();
         pattern2AttributeName.put(Character.valueOf('c'), "cookies");
         pattern2AttributeName.put(Character.valueOf('i'), "requestHeaders");
         pattern2AttributeName.put(Character.valueOf('o'), "responseHeaders");
         pattern2AttributeName.put(Character.valueOf('r'), "requestAttributes");
         pattern2AttributeName.put(Character.valueOf('s'), "sessionAttributes");
+        pattern2AttributeName.put(Character.valueOf('L'), "identifier");
         SUB_OBJECT_PATTERNS = Collections.unmodifiableMap(pattern2AttributeName);
     }
 
@@ -128,10 +129,11 @@ public class JsonAccessLogValve extends AccessLogValve {
         }
     }
 
-    private boolean addSubkeyedItems(ListIterator<AccessLogElement> iterator, List<JsonWrappedElement> elements, String patternAttribute) {
-        if (! elements.isEmpty()) {
+    private boolean addSubkeyedItems(ListIterator<AccessLogElement> iterator, List<JsonWrappedElement> elements,
+            String patternAttribute) {
+        if (!elements.isEmpty()) {
             iterator.add(new StringElement("\"" + patternAttribute + "\": {"));
-            for (JsonWrappedElement element: elements) {
+            for (JsonWrappedElement element : elements) {
                 iterator.add(element);
                 iterator.add(new CharElement(','));
             }
@@ -145,8 +147,8 @@ public class JsonAccessLogValve extends AccessLogValve {
 
     @Override
     protected AccessLogElement[] createLogElements() {
-        Map<Character, List<JsonWrappedElement>> subTypeLists = new HashMap<>();
-        for (Character pattern: SUB_OBJECT_PATTERNS.keySet()) {
+        Map<Character,List<JsonWrappedElement>> subTypeLists = new HashMap<>();
+        for (Character pattern : SUB_OBJECT_PATTERNS.keySet()) {
             subTypeLists.put(pattern, new ArrayList<>());
         }
         boolean hasSub = false;
@@ -162,7 +164,7 @@ public class JsonAccessLogValve extends AccessLogValve {
             }
             // Remove items which should be written as
             // Json objects and add them later in correct order
-            JsonWrappedElement wrappedLogElement = (JsonWrappedElement)logElement;
+            JsonWrappedElement wrappedLogElement = (JsonWrappedElement) logElement;
             AccessLogElement ale = wrappedLogElement.getDelegate();
             if (ale instanceof HeaderElement) {
                 subTypeLists.get(Character.valueOf('i')).add(wrappedLogElement);
@@ -179,13 +181,16 @@ public class JsonAccessLogValve extends AccessLogValve {
             } else if (ale instanceof CookieElement) {
                 subTypeLists.get(Character.valueOf('c')).add(wrappedLogElement);
                 lit.remove();
+            } else if (ale instanceof IdentifierElement) {
+                subTypeLists.get(Character.valueOf('L')).add(wrappedLogElement);
+                lit.remove();
             } else {
                 // Keep the simple items and add separator
                 lit.add(new CharElement(','));
             }
         }
         // Add back the items that are output as Json objects
-        for (Character pattern: SUB_OBJECT_PATTERNS.keySet()) {
+        for (Character pattern : SUB_OBJECT_PATTERNS.keySet()) {
             if (addSubkeyedItems(lit, subTypeLists.get(pattern), SUB_OBJECT_PATTERNS.get(pattern))) {
                 hasSub = true;
             }
@@ -231,7 +236,7 @@ public class JsonAccessLogValve extends AccessLogValve {
             if (patternAttribute == null) {
                 patternAttribute = "other-" + Character.toString(pattern);
             }
-            if (key != null && ! "".equals(key)) {
+            if (key != null && !"".equals(key)) {
                 if (SUB_OBJECT_PATTERNS.containsKey(Character.valueOf(pattern))) {
                     this.attributeName = escapeJsonString(key);
                 } else {

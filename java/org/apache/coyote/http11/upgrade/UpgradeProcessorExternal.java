@@ -96,8 +96,8 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
         } else if (status == SocketEvent.OPEN_WRITE) {
             upgradeServletOutputStream.onWritePossible();
         } else if (status == SocketEvent.STOP) {
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("upgradeProcessor.stop"));
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("upgradeProcessor.stop"));
             }
             try {
                 upgradeServletInputStream.close();
@@ -117,10 +117,9 @@ public class UpgradeProcessorExternal extends UpgradeProcessorBase {
             }
             return SocketState.CLOSED;
         }
-        if (upgradeServletInputStream.isClosed() &&
-                upgradeServletOutputStream.isClosed()) {
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("upgradeProcessor.requiredClose",
+        if (upgradeServletInputStream.isClosed() && upgradeServletOutputStream.isClosed()) {
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("upgradeProcessor.requiredClose",
                         Boolean.valueOf(upgradeServletInputStream.isClosed()),
                         Boolean.valueOf(upgradeServletOutputStream.isClosed())));
             }

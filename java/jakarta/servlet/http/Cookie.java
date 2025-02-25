@@ -45,7 +45,7 @@ import java.util.TreeMap;
  * Cookies affect the caching of the Web pages that use them. HTTP 1.0 does not cache pages that use cookies created
  * with this class. This class does not support the cache control defined with HTTP 1.1.
  * <p>
- * This class supports both the RFC 6265 specification.
+ * This class supports the RFC 6265 specification.
  */
 public class Cookie implements Cloneable, Serializable {
 
@@ -53,6 +53,8 @@ public class Cookie implements Cloneable, Serializable {
     private static final ResourceBundle LSTRINGS = ResourceBundle.getBundle(LSTRING_FILE);
 
     private static final CookieNameValidator validation = new RFC6265Validator();
+
+    private static final String EMPTY_STRING = "";
 
     private static final long serialVersionUID = 2L;
 
@@ -232,13 +234,17 @@ public class Cookie implements Cloneable, Serializable {
      * <p>
      * The default value is <code>false</code>.
      *
-     * @param flag if <code>true</code>, sends the cookie from the browser to the server only when using a secure
-     *                 protocol; if <code>false</code>, sent on any protocol
+     * @param secure if <code>true</code>, sends the cookie from the browser to the server only when using a secure
+     *                   protocol; if <code>false</code>, sent on any protocol
      *
      * @see #getSecure
      */
-    public void setSecure(boolean flag) {
-        setAttributeInternal(SECURE, Boolean.toString(flag));
+    public void setSecure(boolean secure) {
+        if (secure) {
+            setAttributeInternal(SECURE, EMPTY_STRING);
+        } else {
+            setAttributeInternal(SECURE, null);
+        }
     }
 
 
@@ -251,7 +257,7 @@ public class Cookie implements Cloneable, Serializable {
      * @see #setSecure
      */
     public boolean getSecure() {
-        return Boolean.parseBoolean(getAttribute(SECURE));
+        return EMPTY_STRING.equals(getAttribute(SECURE));
     }
 
 
@@ -347,7 +353,11 @@ public class Cookie implements Cloneable, Serializable {
      * @since Servlet 3.0
      */
     public void setHttpOnly(boolean httpOnly) {
-        setAttributeInternal(HTTP_ONLY, Boolean.toString(httpOnly));
+        if (httpOnly) {
+            setAttributeInternal(HTTP_ONLY, EMPTY_STRING);
+        } else {
+            setAttributeInternal(HTTP_ONLY, null);
+        }
     }
 
 
@@ -359,7 +369,7 @@ public class Cookie implements Cloneable, Serializable {
      * @since Servlet 3.0
      */
     public boolean isHttpOnly() {
-        return Boolean.parseBoolean(getAttribute(HTTP_ONLY));
+        return EMPTY_STRING.equals(getAttribute(HTTP_ONLY));
     }
 
 
@@ -409,7 +419,11 @@ public class Cookie implements Cloneable, Serializable {
             }
         }
 
-        attributes.put(name, value);
+        if (value == null) {
+            attributes.remove(name);
+        } else {
+            attributes.put(name, value);
+        }
     }
 
 

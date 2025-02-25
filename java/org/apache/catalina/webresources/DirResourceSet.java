@@ -22,23 +22,32 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.jar.Manifest;
 
 import org.apache.catalina.LifecycleException;
 import org.apache.catalina.WebResource;
+import org.apache.catalina.WebResourceLockSet;
 import org.apache.catalina.WebResourceRoot;
 import org.apache.catalina.WebResourceRoot.ResourceSetType;
 import org.apache.catalina.util.ResourceSet;
 import org.apache.juli.logging.Log;
 import org.apache.juli.logging.LogFactory;
+import org.apache.tomcat.util.http.RequestUtil;
 
 /**
  * Represents a {@link org.apache.catalina.WebResourceSet} based on a directory.
  */
-public class DirResourceSet extends AbstractFileResourceSet {
+public class DirResourceSet extends AbstractFileResourceSet implements WebResourceLockSet {
 
     private static final Log log = LogFactory.getLog(DirResourceSet.class);
+
+    private Map<String,ResourceLock> resourceLocksByPath = new HashMap<>();
+    private Object resourceLocksByPathLock = new Object();
+
 
     /**
      * A no argument constructor is required for this to work with the digester.
@@ -85,27 +94,42 @@ public class DirResourceSet extends AbstractFileResourceSet {
     }
 
 
+    @SuppressWarnings("null") // lock can never be null when lock.key is read
     @Override
     public WebResource getResource(String path) {
         checkPath(path);
         String webAppMount = getWebAppMount();
         WebResourceRoot root = getRoot();
+        boolean readOnly = isReadOnly();
         if (path.startsWith(webAppMount)) {
-            File f = file(path.substring(webAppMount.length()), false);
-            if (f == null) {
-                return new EmptyResource(root, path);
+            /*
+             * Lock the path for reading until the WebResource has been constructed. The lock prevents concurrent reads
+             * and writes (e.g. HTTP GET and PUT / DELETE) for the same path causing corruption of the FileResource
+             * where some of the fields are set as if the file exists and some as set as if it does not.
+             */
+            ResourceLock lock = readOnly ? null : lockForRead(path);
+            try {
+                File f = file(path.substring(webAppMount.length()), false);
+                if (f == null) {
+                    return new EmptyResource(root, path);
+                }
+                if (!f.exists()) {
+                    return new EmptyResource(root, path, f);
+                }
+                if (f.isDirectory() && path.charAt(path.length() - 1) != '/') {
+                    path = path + '/';
+                }
+                return new FileResource(root, path, f, readOnly, getManifest(), this, readOnly ? null : lock.key);
+            } finally {
+                if (!readOnly) {
+                    unlockForRead(lock);
+                }
             }
-            if (!f.exists()) {
-                return new EmptyResource(root, path, f);
-            }
-            if (f.isDirectory() && path.charAt(path.length() - 1) != '/') {
-                path = path + '/';
-            }
-            return new FileResource(root, path, f, isReadOnly(), getManifest());
         } else {
             return new EmptyResource(root, path);
         }
     }
+
 
     @Override
     public String[] list(String path) {
@@ -164,8 +188,10 @@ public class DirResourceSet extends AbstractFileResourceSet {
                                 // path that was contributed by 'f' and check
                                 // that what is left does not contain a symlink.
                                 absPath = entry.getAbsolutePath().substring(f.getAbsolutePath().length());
-                                if (entry.getCanonicalPath().length() >= f.getCanonicalPath().length()) {
-                                    canPath = entry.getCanonicalPath().substring(f.getCanonicalPath().length());
+                                String entryCanPath = entry.getCanonicalPath();
+                                String fCanPath = f.getCanonicalPath();
+                                if (entryCanPath.length() >= fCanPath.length()) {
+                                    canPath = entryCanPath.substring(fCanPath.length());
                                     if (absPath.equals(canPath)) {
                                         symlink = false;
                                     }
@@ -244,32 +270,42 @@ public class DirResourceSet extends AbstractFileResourceSet {
             return false;
         }
 
-        File dest = null;
         String webAppMount = getWebAppMount();
-        if (path.startsWith(webAppMount)) {
+        if (!path.startsWith(webAppMount)) {
+            return false;
+        }
+
+        File dest = null;
+        /*
+         * Lock the path for writing until the write is complete. The lock prevents concurrent reads and writes (e.g.
+         * HTTP GET and PUT / DELETE) for the same path causing corruption of the FileResource where some of the fields
+         * are set as if the file exists and some as set as if it does not.
+         */
+        ResourceLock lock = lockForWrite(path);
+        try {
             dest = file(path.substring(webAppMount.length()), false);
             if (dest == null) {
                 return false;
             }
-        } else {
-            return false;
-        }
 
-        if (dest.exists() && !overwrite) {
-            return false;
-        }
-
-        try {
-            if (overwrite) {
-                Files.copy(is, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            } else {
-                Files.copy(is, dest.toPath());
+            if (dest.exists() && !overwrite) {
+                return false;
             }
-        } catch (IOException ioe) {
-            return false;
-        }
 
-        return true;
+            try {
+                if (overwrite) {
+                    Files.copy(is, dest.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    Files.copy(is, dest.toPath());
+                }
+            } catch (IOException ioe) {
+                return false;
+            }
+
+            return true;
+        } finally {
+            unlockForWrite(lock);
+        }
     }
 
     @Override
@@ -294,6 +330,95 @@ public class DirResourceSet extends AbstractFileResourceSet {
                 } catch (IOException e) {
                     log.warn(sm.getString("dirResourceSet.manifestFail", mf.getAbsolutePath()), e);
                 }
+            }
+        }
+    }
+
+
+    private String getLockKey(String path) {
+        /*
+         * Normalize path to ensure that the same key is used for the same path. Always convert path to lower case as
+         * the file system may be case insensitive. A minor performance improvement is possible by removing the
+         * conversion to lower case for case sensitive file systems but confirming that all the directories within a
+         * DirResourceSet are case sensitive is much harder than it might first appear due to various edge cases. In
+         * particular, Windows can make individual directories case sensitive and File.getCanonicalPath() doesn't return
+         * the canonical file name on Linux for some case insensitive file systems (such as mounted Windows shares).
+         */
+        return RequestUtil.normalize(path).toLowerCase(Locale.ENGLISH);
+    }
+
+
+    @Override
+    public ResourceLock lockForRead(String path) {
+        String key = getLockKey(path);
+        ResourceLock resourceLock = null;
+        synchronized (resourceLocksByPathLock) {
+            /*
+             * Obtain the ResourceLock and increment the usage count inside the sync to ensure that that map always has
+             * a consistent view of the currently "in-use" ResourceLocks.
+             */
+            resourceLock = resourceLocksByPath.get(key);
+            if (resourceLock == null) {
+                resourceLock = new ResourceLock(key);
+                resourceLocksByPath.put(key, resourceLock);
+            }
+            resourceLock.count.incrementAndGet();
+        }
+        // Obtain the lock outside the sync as it will block if there is a current write lock.
+        resourceLock.reentrantLock.readLock().lock();
+        return resourceLock;
+    }
+
+
+    @Override
+    public void unlockForRead(ResourceLock resourceLock) {
+        // Unlock outside the sync as there is no need to do it inside.
+        resourceLock.reentrantLock.readLock().unlock();
+        synchronized (resourceLocksByPathLock) {
+            /*
+             * Decrement the usage count and remove ResourceLocks no longer required inside the sync to ensure that that
+             * map always has a consistent view of the currently "in-use" ResourceLocks.
+             */
+            if (resourceLock.count.decrementAndGet() == 0) {
+                resourceLocksByPath.remove(resourceLock.key);
+            }
+        }
+    }
+
+
+    @Override
+    public ResourceLock lockForWrite(String path) {
+        String key = getLockKey(path);
+        ResourceLock resourceLock = null;
+        synchronized (resourceLocksByPathLock) {
+            /*
+             * Obtain the ResourceLock and increment the usage count inside the sync to ensure that that map always has
+             * a consistent view of the currently "in-use" ResourceLocks.
+             */
+            resourceLock = resourceLocksByPath.get(key);
+            if (resourceLock == null) {
+                resourceLock = new ResourceLock(key);
+                resourceLocksByPath.put(key, resourceLock);
+            }
+            resourceLock.count.incrementAndGet();
+        }
+        // Obtain the lock outside the sync as it will block if there are any other current locks.
+        resourceLock.reentrantLock.writeLock().lock();
+        return resourceLock;
+    }
+
+
+    @Override
+    public void unlockForWrite(ResourceLock resourceLock) {
+        // Unlock outside the sync as there is no need to do it inside.
+        resourceLock.reentrantLock.writeLock().unlock();
+        synchronized (resourceLocksByPathLock) {
+            /*
+             * Decrement the usage count and remove ResourceLocks no longer required inside the sync to ensure that that
+             * map always has a consistent view of the currently "in-use" ResourceLocks.
+             */
+            if (resourceLock.count.decrementAndGet() == 0) {
+                resourceLocksByPath.remove(resourceLock.key);
             }
         }
     }

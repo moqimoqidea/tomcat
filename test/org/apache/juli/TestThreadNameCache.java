@@ -35,10 +35,11 @@ public class TestThreadNameCache {
         Method getThreadName = olf.getClass().getDeclaredMethod("getThreadName", long.class);
         getThreadName.setAccessible(true);
         Thread thread = new Thread() {
+            @SuppressWarnings("deprecation")
             @Override
             public void run() {
                 setName(THREAD_NAME);
-                threadId = Integer.valueOf((int) threadId());
+                threadId = Integer.valueOf((int) getId());
                 threadIdLatch.countDown();
                 try {
                     cacheLatch.await();

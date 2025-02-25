@@ -51,10 +51,10 @@ import org.apache.tomcat.util.http.fileupload.FileItemFactory;
  * may be used.
  * </p>
  *
- * <p>Temporary files, which are created for file items, should be
- * deleted later on.</p>
+ * <p>Temporary files, which are created for file items, will be deleted when
+ * the associated request is recycled.</p>
  *
- * @since 1.1
+ * @since FileUpload 1.1
  */
 public class DiskFileItemFactory implements FileItemFactory {
 
@@ -178,7 +178,7 @@ public class DiskFileItemFactory implements FileItemFactory {
      */
     @Override
     public FileItem createItem(final String fieldName, final String contentType,
-                final boolean isFormField, final String fileName) {
+            final boolean isFormField, final String fileName) {
         final DiskFileItem result = new DiskFileItem(fieldName, contentType,
                 isFormField, fileName, sizeThreshold, repository);
         result.setDefaultCharset(defaultCharset);

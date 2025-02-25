@@ -104,8 +104,8 @@ public class StandardManager extends ManagerBase {
 
     @Override
     public void load() throws ClassNotFoundException, IOException {
-        if (log.isDebugEnabled()) {
-            log.debug("Start: Loading persisted sessions");
+        if (log.isTraceEnabled()) {
+            log.trace("Start: Loading persisted sessions");
         }
 
         // Initialize our internal data structures
@@ -116,8 +116,8 @@ public class StandardManager extends ManagerBase {
         if (file == null) {
             return;
         }
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("standardManager.loading", pathname));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("standardManager.loading", pathname));
         }
         Loader loader = null;
         ClassLoader classLoader = null;
@@ -140,8 +140,8 @@ public class StandardManager extends ManagerBase {
                         getSessionAttributeValueClassNamePattern(), getWarnOnSessionAttributeFilterFailure())) {
                     Integer count = (Integer) ois.readObject();
                     int n = count.intValue();
-                    if (log.isDebugEnabled()) {
-                        log.debug("Loading " + n + " persisted sessions");
+                    if (log.isTraceEnabled()) {
+                        log.trace("Loading " + n + " persisted sessions");
                     }
                     for (int i = 0; i < n; i++) {
                         StandardSession session = getNewSession();
@@ -155,7 +155,6 @@ public class StandardManager extends ManagerBase {
                             session.setValid(true);
                             session.expire();
                         }
-                        sessionCounter++;
                     }
                 } finally {
                     // Delete the persistent storage file
@@ -168,21 +167,21 @@ public class StandardManager extends ManagerBase {
             }
         } catch (FileNotFoundException e) {
             if (log.isDebugEnabled()) {
-                log.debug("No persisted data file found");
+                log.debug(sm.getString("standardManager.noFile", file.getAbsolutePath()));
             }
             return;
         }
 
-        if (log.isDebugEnabled()) {
-            log.debug("Finish: Loading persisted sessions");
+        if (log.isTraceEnabled()) {
+            log.trace("Finish: Loading persisted sessions");
         }
     }
 
 
     @Override
     public void unload() throws IOException {
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("standardManager.unloading.debug"));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("standardManager.unloading.debug"));
         }
 
         if (sessions.isEmpty()) {
@@ -195,8 +194,8 @@ public class StandardManager extends ManagerBase {
         if (file == null) {
             return;
         }
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("standardManager.unloading", pathname));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("standardManager.unloading", pathname));
         }
 
         // Keep a note of sessions that are expired
@@ -207,8 +206,8 @@ public class StandardManager extends ManagerBase {
                 ObjectOutputStream oos = new ObjectOutputStream(bos)) {
 
             synchronized (sessions) {
-                if (log.isDebugEnabled()) {
-                    log.debug("Unloading " + sessions.size() + " sessions");
+                if (log.isTraceEnabled()) {
+                    log.trace("Unloading " + sessions.size() + " sessions");
                 }
                 // Write the number of active sessions, followed by the details
                 oos.writeObject(Integer.valueOf(sessions.size()));
@@ -223,7 +222,7 @@ public class StandardManager extends ManagerBase {
 
         // Expire all the sessions we just wrote
         if (log.isDebugEnabled()) {
-            log.debug("Expiring " + list.size() + " persisted sessions");
+            log.debug(sm.getString("standardManager.expiringSessions", Integer.toString(list.size())));
         }
         for (StandardSession session : list) {
             try {
@@ -235,8 +234,8 @@ public class StandardManager extends ManagerBase {
             }
         }
 
-        if (log.isDebugEnabled()) {
-            log.debug("Unloading complete");
+        if (log.isTraceEnabled()) {
+            log.trace("Unloading complete");
         }
     }
 
@@ -249,7 +248,7 @@ public class StandardManager extends ManagerBase {
      *                                   used
      */
     @Override
-    protected synchronized void startInternal() throws LifecycleException {
+    protected void startInternal() throws LifecycleException {
 
         super.startInternal();
 
@@ -273,10 +272,10 @@ public class StandardManager extends ManagerBase {
      *                                   used
      */
     @Override
-    protected synchronized void stopInternal() throws LifecycleException {
+    protected void stopInternal() throws LifecycleException {
 
-        if (log.isDebugEnabled()) {
-            log.debug("Stopping");
+        if (log.isTraceEnabled()) {
+            log.trace("Stopping");
         }
 
         setState(LifecycleState.STOPPING);

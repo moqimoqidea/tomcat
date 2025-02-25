@@ -54,22 +54,23 @@ import org.apache.tomcat.util.ExceptionUtils;
  * <li><code>date</code>: The date in yyyy-mm-dd format for GMT</li>
  * <li><code>s-dns</code>: The server dns entry</li>
  * <li><code>s-ip</code>: The server ip address</li>
- * <li><code>cs(XXX)</code>: The value of header XXX from client to server</li>
- * <li><code>sc(XXX)</code>: The value of header XXX from server to client</li>
+ * <li><code>cs(xxx)</code>: The value of header xxx from client to server</li>
+ * <li><code>sc(xxx)</code>: The value of header xxx from server to client</li>
  * <li><code>sc-status</code>: The status code</li>
  * <li><code>time</code>: Time the request was served</li>
  * <li><code>time-taken</code>: Time (in seconds) taken to serve the request</li>
  * <li><code>x-threadname</code>: Current request thread name (can compare later with stacktraces)</li>
- * <li><code>x-A(XXX)</code>: Pull XXX attribute from the servlet context</li>
- * <li><code>x-C(XXX)</code>: Pull the cookie(s) of the name XXX</li>
- * <li><code>x-O(XXX)</code>: Pull the all response header values XXX</li>
- * <li><code>x-R(XXX)</code>: Pull XXX attribute from the servlet request</li>
- * <li><code>x-S(XXX)</code>: Pull XXX attribute from the session</li>
+ * <li><code>x-A(xxx)</code>: Pull xxx attribute from the servlet context</li>
+ * <li><code>x-C(xxx)</code>: Pull the cookie(s) of the name xxx</li>
+ * <li><code>x-O(xxx)</code>: Pull the all response header values xxx</li>
+ * <li><code>x-R(xxx)</code>: Pull xxx attribute from the servlet request</li>
+ * <li><code>x-S(xxx)</code>: Pull xxx attribute from the session</li>
  * <li><code>x-P(...)</code>: Call request.getParameter(...) and URLencode it. Helpful to capture certain POST
  * parameters.</li>
  * <li>For any of the x-H(...) the following method will be called from the HttpServletRequest object</li>
  * <li><code>x-H(authType)</code>: getAuthType</li>
  * <li><code>x-H(characterEncoding)</code>: getCharacterEncoding</li>
+ * <li><code>x-H(connectionId)</code>: getConnectionId</li>
  * <li><code>x-H(contentLength)</code>: getContentLength</li>
  * <li><code>x-H(locale)</code>: getLocale</li>
  * <li><code>x-H(protocol)</code>: getProtocol</li>
@@ -153,9 +154,6 @@ public class ExtendedAccessLogValve extends AccessLogValve {
         return buffer.toString();
     }
 
-    /**
-     * Open the new log file for the date specified by <code>dateStamp</code>.
-     */
     @Override
     protected synchronized void open() {
         super.open();
@@ -174,8 +172,8 @@ public class ExtendedAccessLogValve extends AccessLogValve {
         // Milli-seconds in 24 hours
         private static final long INTERVAL = (1000 * 60 * 60 * 24);
 
-        private static final ThreadLocal<ElementTimestampStruct> currentDate = ThreadLocal
-                .withInitial(() -> new ElementTimestampStruct("yyyy-MM-dd"));
+        private static final ThreadLocal<ElementTimestampStruct> currentDate =
+                ThreadLocal.withInitial(() -> new ElementTimestampStruct("yyyy-MM-dd"));
 
         @Override
         public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
@@ -193,8 +191,8 @@ public class ExtendedAccessLogValve extends AccessLogValve {
         // Milli-seconds in a second
         private static final long INTERVAL = 1000;
 
-        private static final ThreadLocal<ElementTimestampStruct> currentTime = ThreadLocal
-                .withInitial(() -> new ElementTimestampStruct("HH:mm:ss"));
+        private static final ThreadLocal<ElementTimestampStruct> currentTime =
+                ThreadLocal.withInitial(() -> new ElementTimestampStruct("HH:mm:ss"));
 
         @Override
         public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
@@ -489,8 +487,8 @@ public class ExtendedAccessLogValve extends AccessLogValve {
 
     @Override
     protected AccessLogElement[] createLogElements() {
-        if (log.isDebugEnabled()) {
-            log.debug("decodePattern, pattern =" + pattern);
+        if (log.isTraceEnabled()) {
+            log.trace("decodePattern, pattern =" + pattern);
         }
         List<AccessLogElement> list = new ArrayList<>();
 
@@ -507,8 +505,8 @@ public class ExtendedAccessLogValve extends AccessLogValve {
 
             String token = tokenizer.getToken();
             while (token != null) {
-                if (log.isDebugEnabled()) {
-                    log.debug("token = " + token);
+                if (log.isTraceEnabled()) {
+                    log.trace("token = " + token);
                 }
                 AccessLogElement element = getLogElement(token, tokenizer);
                 if (element == null) {
@@ -524,8 +522,8 @@ public class ExtendedAccessLogValve extends AccessLogValve {
                 }
                 token = tokenizer.getToken();
             }
-            if (log.isDebugEnabled()) {
-                log.debug("finished decoding with element size of: " + list.size());
+            if (log.isTraceEnabled()) {
+                log.trace("finished decoding with element size of: " + list.size());
             }
             return list.toArray(new AccessLogElement[0]);
         } catch (IOException e) {
@@ -541,7 +539,19 @@ public class ExtendedAccessLogValve extends AccessLogValve {
             if (tokenizer.hasSubToken()) {
                 String nextToken = tokenizer.getToken();
                 if ("taken".equals(nextToken)) {
-                    return new ElapsedTimeElement(false, false);
+                    nextToken = tokenizer.getToken();
+
+                    if ("ns".equals(nextToken)) {
+                        return new ElapsedTimeElement(ElapsedTimeElement.Style.NANOSECONDS);
+                    } else if ("us".equals(nextToken)) {
+                        return new ElapsedTimeElement(ElapsedTimeElement.Style.MICROSECONDS);
+                    } else if ("ms".equals(nextToken)) {
+                        return new ElapsedTimeElement(ElapsedTimeElement.Style.MILLISECONDS);
+                    } else if ("fracsec".equals(nextToken)) {
+                        return new ElapsedTimeElement(ElapsedTimeElement.Style.SECONDS_FRACTIONAL);
+                    } else {
+                        return new ElapsedTimeElement(ElapsedTimeElement.Style.SECONDS);
+                    }
                 }
             } else {
                 return new TimeElement();
@@ -756,6 +766,13 @@ public class ExtendedAccessLogValve extends AccessLogValve {
                 @Override
                 public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
                     buf.append(wrap("" + request.getContentLengthLong()));
+                }
+            };
+        } else if ("connectionId".equals(parameter)) {
+            return new AccessLogElement() {
+                @Override
+                public void addElement(CharArrayWriter buf, Date date, Request request, Response response, long time) {
+                    buf.append(wrap("" + request.getServletConnection().getConnectionId()));
                 }
             };
         } else if ("characterEncoding".equals(parameter)) {

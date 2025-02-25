@@ -177,6 +177,8 @@ public class CoyoteAdapter implements Adapter {
                         }
                     } catch (Throwable t) {
                         ExceptionUtils.handleThrowable(t);
+                        // Allow the error handling to write to the response
+                        response.setSuspended(false);
                         // Need to trigger the call to AbstractProcessor.setErrorState()
                         // before the listener is called so the listener can call complete
                         // Therefore no need to set success=false as that would trigger a
@@ -210,6 +212,8 @@ public class CoyoteAdapter implements Adapter {
                         }
                     } catch (Throwable t) {
                         ExceptionUtils.handleThrowable(t);
+                        // Allow the error handling to write to the response
+                        response.setSuspended(false);
                         // Need to trigger the call to AbstractProcessor.setErrorState()
                         // before the listener is called so the listener can call complete
                         // Therefore no need to set success=false as that would trigger a
@@ -233,8 +237,8 @@ public class CoyoteAdapter implements Adapter {
 
             if (request.isAsyncDispatching()) {
                 connector.getService().getContainer().getPipeline().getFirst().invoke(request, response);
-                Throwable t = (Throwable) request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
-                if (t != null) {
+                if (response.isError()) {
+                    Throwable t = (Throwable) request.getAttribute(RequestDispatcher.ERROR_EXCEPTION);
                     asyncConImpl.setErrorState(t, true);
                 }
             }
@@ -586,7 +590,7 @@ public class CoyoteAdapter implements Adapter {
 
         // Check for ping OPTIONS * request
         if (undecodedURI.equals("*")) {
-            if (req.method().equalsIgnoreCase("OPTIONS")) {
+            if (req.method().equals("OPTIONS")) {
                 StringBuilder allow = new StringBuilder();
                 allow.append("GET, HEAD, POST, PUT, DELETE, OPTIONS");
                 // Trace if allowed
@@ -605,7 +609,7 @@ public class CoyoteAdapter implements Adapter {
         MessageBytes decodedURI = req.decodedURI();
 
         // Filter CONNECT method
-        if (req.method().equalsIgnoreCase("CONNECT")) {
+        if (req.method().equals("CONNECT")) {
             response.sendError(HttpServletResponse.SC_NOT_IMPLEMENTED, sm.getString("coyoteAdapter.connect"));
         } else {
             // No URI for CONNECT requests
@@ -626,7 +630,8 @@ public class CoyoteAdapter implements Adapter {
                 // %xx decoding of the URL
                 try {
                     req.getURLDecoder().convert(decodedURI.getByteChunk(),
-                            connector.getEncodedSolidusHandlingInternal());
+                            connector.getEncodedSolidusHandlingInternal(),
+                            connector.getEncodedReverseSolidusHandlingInternal());
                 } catch (IOException ioe) {
                     response.sendError(400, sm.getString("coyoteAdapter.invalidURIWithMessage", ioe.getMessage()));
                 }
@@ -804,7 +809,7 @@ public class CoyoteAdapter implements Adapter {
         }
 
         // Filter TRACE method
-        if (!connector.getAllowTrace() && req.method().equalsIgnoreCase("TRACE")) {
+        if (!connector.getAllowTrace() && req.method().equals("TRACE")) {
             Wrapper wrapper = request.getWrapper();
             String header = null;
             if (wrapper != null) {
@@ -900,10 +905,10 @@ public class CoyoteAdapter implements Adapter {
         // encoding that doesn't give the expected result so be explicit
         Charset charset = connector.getURICharset();
 
-        if (log.isDebugEnabled()) {
-            log.debug(sm.getString("coyoteAdapter.debug", "uriBC", uriBC.toString()));
-            log.debug(sm.getString("coyoteAdapter.debug", "semicolon", String.valueOf(semicolon)));
-            log.debug(sm.getString("coyoteAdapter.debug", "enc", charset.name()));
+        if (log.isTraceEnabled()) {
+            log.trace(sm.getString("coyoteAdapter.debug", "uriBC", uriBC.toString()));
+            log.trace(sm.getString("coyoteAdapter.debug", "semicolon", String.valueOf(semicolon)));
+            log.trace(sm.getString("coyoteAdapter.debug", "enc", charset.name()));
         }
 
         while (semicolon > -1) {
@@ -934,10 +939,10 @@ public class CoyoteAdapter implements Adapter {
                 uriBC.setEnd(start + semicolon);
             }
 
-            if (log.isDebugEnabled()) {
-                log.debug(sm.getString("coyoteAdapter.debug", "pathParamStart", String.valueOf(pathParamStart)));
-                log.debug(sm.getString("coyoteAdapter.debug", "pathParamEnd", String.valueOf(pathParamEnd)));
-                log.debug(sm.getString("coyoteAdapter.debug", "pv", pv));
+            if (log.isTraceEnabled()) {
+                log.trace(sm.getString("coyoteAdapter.debug", "pathParamStart", String.valueOf(pathParamStart)));
+                log.trace(sm.getString("coyoteAdapter.debug", "pathParamEnd", String.valueOf(pathParamEnd)));
+                log.trace(sm.getString("coyoteAdapter.debug", "pv", pv));
             }
 
             if (pv != null) {
@@ -946,10 +951,10 @@ public class CoyoteAdapter implements Adapter {
                     String name = pv.substring(0, equals);
                     String value = pv.substring(equals + 1);
                     request.addPathParameter(name, value);
-                    if (log.isDebugEnabled()) {
-                        log.debug(sm.getString("coyoteAdapter.debug", "equals", String.valueOf(equals)));
-                        log.debug(sm.getString("coyoteAdapter.debug", "name", name));
-                        log.debug(sm.getString("coyoteAdapter.debug", "value", value));
+                    if (log.isTraceEnabled()) {
+                        log.trace(sm.getString("coyoteAdapter.debug", "equals", String.valueOf(equals)));
+                        log.trace(sm.getString("coyoteAdapter.debug", "name", name));
+                        log.trace(sm.getString("coyoteAdapter.debug", "value", value));
                     }
                 }
             }
@@ -1013,8 +1018,8 @@ public class CoyoteAdapter implements Adapter {
                     request.setRequestedSessionId(scookie.getValue().toString());
                     request.setRequestedSessionCookie(true);
                     request.setRequestedSessionURL(false);
-                    if (log.isDebugEnabled()) {
-                        log.debug(" Requested cookie session id is " + request.getRequestedSessionId());
+                    if (log.isTraceEnabled()) {
+                        log.trace(" Requested cookie session id is " + request.getRequestedSessionId());
                     }
                 } else {
                     if (!request.isRequestedSessionIdValid()) {
