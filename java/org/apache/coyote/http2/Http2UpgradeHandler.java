@@ -86,12 +86,12 @@ class Http2UpgradeHandler extends AbstractStream implements InternalHttpUpgradeH
     /**
      * Flag indicating the end of a stream.
      */
-    protected static final int FLAG_END_OF_STREAM = 1;
+    protected static final byte FLAG_END_OF_STREAM = 1;
 
     /**
      * Flag indicating the end of headers.
      */
-    protected static final int FLAG_END_OF_HEADERS = 4;
+    protected static final byte FLAG_END_OF_HEADERS = 4;
 
     /**
      * PING frame with zero payload length and zero stream ID.
