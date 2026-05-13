@@ -258,6 +258,10 @@
         Remove support for HTTP 0.9. (markt)
       </update>
       <!-- Entries for backport and removal before 12.0.0-M1 below this line -->
+      <add>
+        Log a suitable warning if an encrypted PEM file is detected using an
+        insecure form for encryption. (markt)
+      </add>
     </changelog>
   </subsection>
   <subsection name="Jasper">
