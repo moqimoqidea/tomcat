@@ -305,6 +305,11 @@
         <code>AES/GCM/NoPadding</code>. (markt)
       </scode>
       <!-- Entries for backport and removal before 12.0.0-M1 below this line -->
+      <fix>
+        Expand wording and increase visibility of log message when cloud
+        membership is configured without a trust store as all certificates will
+        be trusted in this configuration. (markt)
+      </fix>
     </changelog>
   </subsection>
   <subsection name="WebSocket">
