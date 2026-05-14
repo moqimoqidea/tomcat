@@ -24,7 +24,6 @@ import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
 import java.math.BigDecimal;
 import java.math.BigInteger;
-import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.TemporalAccessor;
@@ -795,9 +794,9 @@ public class ELSupport {
      * @return true if either operand is a date-related type
      */
     public static boolean isDateOp(final Object obj0, Object obj1) {
+        // java.sql.Timestamp is a sub-class of java.util.Date so an explicit check is not required
         return obj0 instanceof TemporalAccessor || obj1 instanceof TemporalAccessor || obj0 instanceof Clock ||
-                obj1 instanceof Clock || obj0 instanceof Date || obj1 instanceof Date || obj0 instanceof Timestamp ||
-                obj1 instanceof Timestamp;
+                obj1 instanceof Clock || obj0 instanceof Date || obj1 instanceof Date;
     }
 
     /**
