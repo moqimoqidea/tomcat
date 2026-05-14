@@ -429,45 +429,6 @@ public final class SSLContext {
     public static native void setVerify(long ctx, int level, int depth);
 
     /**
-     * When tc-native encounters a SNI extension in the TLS handshake it will call this method to determine which
-     * OpenSSL SSLContext to use for the connection.
-     *
-     * @param currentCtx  The OpenSSL SSLContext that the handshake started to use. This will be the default OpenSSL
-     *                        SSLContext for the endpoint associated with the socket.
-     * @param sniHostName The host name requested by the client
-     *
-     * @return The Java representation of the pointer to the OpenSSL SSLContext to use for the given host or zero if no
-     *             SSLContext could be identified. Always returns {@code 0}.
-     *
-     * @deprecated Unused. This method will be removed in Tomcat 12 onwards.
-     */
-    @Deprecated
-    public static long sniCallBack(long currentCtx, String sniHostName) {
-        return 0;
-    }
-
-    /**
-     * Interface implemented by components that will receive the call back to select an OpenSSL SSLContext based on the
-     * host name requested by the client.
-     *
-     * @deprecated Unused. This interface will be removed in Tomcat 12 onwards
-     */
-    @Deprecated
-    public interface SNICallBack {
-
-        /**
-         * This callback is made during the TLS handshake when the client uses the SNI extension to request a specific
-         * TLS host.
-         *
-         * @param sniHostName The host name requested by the client - must be in lower case
-         *
-         * @return The Java representation of the pointer to the OpenSSL SSLContext to use for the given host or zero if
-         *             no SSLContext could be identified
-         */
-        long getSslContext(String sniHostName);
-    }
-
-    /**
      * Allow to hook {@link CertificateVerifier} into the handshake processing. This will call
      * {@code SSL_CTX_set_cert_verify_callback} and so replace the default verification callback used by openssl
      *
